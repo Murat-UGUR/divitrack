@@ -1,0 +1,54 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ---------- Sanal ortamlar ----------
+.venv/
+venv/
+env/
+.python-version
+
+# ---------- Test / kalite araçları ----------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- IDE / işletim sistemi ----------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- GİZLİLİK: Kişisel finansal veriler ASLA commit edilmez ----------
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+exports/
+backups/
+*.csv
+*.xlsx
+!tests/fixtures/*.csv
+
+# ---------- Sırlar ----------
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# ---------- Loglar ----------
+logs/
+*.log

@@ -1,0 +1,13 @@
+[server]
+headless = true
+address = "127.0.0.1"   # Sadece lokal erişim — ağa açılmaz
+
+[browser]
+gatherUsageStats = false  # Telemetri kapalı
+
+[theme]
+base = "dark"
+primaryColor = "#3987e5"
+backgroundColor = "#1a1a19"
+secondaryBackgroundColor = "#262624"
+textColor = "#ffffff"
