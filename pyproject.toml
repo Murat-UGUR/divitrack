@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "divitrack"
-version = "0.1.0"
-description = "Gizlilik odaklı, lokal çalışan kişisel portföy ve temettü takip uygulaması"
+version = "0.2.0"
+description = "Gizlilik odaklı, lokal çalışan kişisel portföy, temettü ve bütçe takip uygulaması"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
