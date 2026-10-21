@@ -17,9 +17,10 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Kurumsal İşlemler** | Bedelsiz / bölünme (maliyetsiz adet), bedelli (rüçhan), temettüden alış (yeni para sayılmaz) |
 | **Varlık Sınıfları** | BIST Hisse · ABD Hisse/ETF · Yatırım Fonu · Kıymetli Maden (gram/ons altın ve gümüş) · Nakit/BES (manuel fiyat) |
 | **Amaç ve Hedefler** | Varlık başına amaç; amaç bazlı hedef dağılım, sapma toleransı, tek kalem sınırı, deneme bütçesi |
-| **Analiz** | Amaçlara göre dağılım ve hedef, TÜFE ile reel getiri ("yatırdığın para bugün ne etmeli"), 100 üzerinden sağlık puanı ve puanın nereden geldiği, kur/fiyat şoklu "ya şöyle olursa?" senaryosu |
+| **Analiz** | Amaçlara göre dağılım ve hedef, TÜFE ile reel getiri ("yatırdığın para bugün ne etmeli"), 100 üzerinden sağlık puanı ve puanın nereden geldiği ve aylara göre seyri, kalem kalem varlık karnesi, kur/fiyat şoklu "ya şöyle olursa?" senaryosu |
 | **Dikkat Edilecekler** | Hedef sapması, yoğunlaşma, fiyatsız varlık, eski TÜFE, aşılan bütçe, yaklaşan temettü ve beyan sınırı uyarıları |
-| **Bütçe** | Gelir/gider kategorileri, aylık kategori bütçeleri, tasarruf oranı, 12 aylık seyir, banka dökümünden CSV içe aktarma |
+| **Bütçe** | Gelir/gider kategorileri, aylık kategori bütçeleri, tasarruf oranı, 12 aylık seyir |
+| **Banka Dökümü** | Herhangi bir bankanın CSV dökümünü kolon eşleyerek içe aktarma (tek tutar veya Borç/Alacak), açıklamaya göre otomatik kategori kuralları, önizlemede elle düzeltme, mükerrer kayıt koruması |
 | **Aylık Plan** | Ayın net tasarrufundan yatırıma ayrılan tutarı satış yapmadan hedefe en çok yaklaştıracak şekilde amaçlara böler; aylık rutin listesi |
 | **Temettü Takibi** | Ödenen/beklenen kayıtlar, stopaj (varsayılan BIST %15, ABD %20 — ayarlanabilir), TTM verim ve maliyete göre verim, 24 aylık takvim grafiği, Yahoo geçmişinden otomatik kayıt önerisi |
 | **Canlı Veri** | `yfinance` ile fiyat, temettü geçmişi ve döviz kurları; SQLite önbelleği, ağ hatasında son bilinen fiyatla çalışma, tam çevrimdışı mod |
@@ -52,7 +53,7 @@ docker run -p 127.0.0.1:8501:8501 -v "$(pwd)/data:/app/data" divitrack
 1. **Ayarlar & Veri → Hedefler ve kurallar**: amaç hedeflerinizi (toplam %100), tek kalem sınırını, tasarruf hedefinizi ve bu yılın yurt dışı temettü beyan sınırını girin. **TÜFE** bölümüne aylık endeksi ekleyin.
 2. **Varlıklar & İşlemler → Varlıklar**: varlığı tanımlayın ve amacını seçin (ör. BIST `THYAO` → Büyüme, `XAU-GRAM` → Koruma).
 3. **Yeni İşlem**: alış/satış ve kurumsal işlemleri girin. Ondalık için `12,5` veya `12.5` yazabilirsiniz.
-4. **Bütçe**: ayın gelir ve giderlerini girin (veya bankadan aldığınız CSV'yi yükleyin), kategori bütçelerini belirleyin.
+4. **Bütçe**: ayın gelir ve giderlerini girin ya da *Banka dökümü* sekmesinden bankanızın CSV'sini yükleyin. Sık geçen açıklamalar için kural tanımlayın (*migros* → Market); sonraki dökümler otomatik kategorilenir.
 5. **Aylık Plan**: bütçeden kalan tutarın amaçlara nasıl bölüneceğini görün, alımları yapıp işlem olarak kaydedin.
 6. **Portföy Özeti / Analiz**: sağlık puanı, uyarılar, reel getiri ve senaryolar. Değer grafiği için *Geçmişi işlemlerden yeniden oluştur*.
 7. **Temettüler**: *Geçmişten Aktar* sekmesi, elde tuttuğunuz döneme denk gelen ödemeleri tek tıkla kaydeder; beyan sınırı paneli yurt dışı temettüleri izler.
@@ -116,7 +117,7 @@ divitrack/
 ├── src/divitrack/
 │   ├── config.py                # .env / ortam değişkenleri
 │   ├── bootstrap.py             # composition root
-│   ├── core/                    # enums, entities, calculations, inflation, planning, ports, money
+│   ├── core/                    # enums, entities, calculations, inflation, planning, statement, ports
 │   ├── db/                      # sqlite3 bağlantısı, şema + migration (PRAGMA user_version)
 │   ├── repositories/            # satır ↔ entity, CRUD
 │   ├── services/
@@ -125,7 +126,7 @@ divitrack/
 │   │   ├── portfolio_service.py
 │   │   ├── dividend_engine.py
 │   │   ├── snapshot_service.py
-│   │   ├── budget_service.py    # gelir/gider, bütçe, tasarruf oranı
+│   │   ├── budget_service.py    # gelir/gider, bütçe, tasarruf oranı, döküm içe aktarma
 │   │   └── insights_service.py  # dağılım, reel getiri, puan, uyarılar, plan, beyan sınırı
 │   └── ui/                      # Streamlit sayfaları, grafikler, tablolar, biçimlendirme
 ├── tests/                       # unit + integration + UI smoke testleri
@@ -162,7 +163,9 @@ Yeni bir veri sağlayıcısı eklemek için `core/ports.py` içindeki `PriceProv
 - [x] Gelir/gider ve bütçe modülü, aylık yatırım planı
 - [ ] TEFAS entegrasyonu (BES/yatırım fonu fiyatları)
 - [ ] TÜFE'nin resmi kaynaktan otomatik alınması
-- [ ] Banka dökümü kolon eşleme sihirbazı
+- [x] Banka dökümü kolon eşleme sihirbazı ve kategori kuralları
+- [x] Varlık karnesi ve aylık puan geçmişi
+- [ ] Excel (.xlsx) dökümleri
 
 ## ⚠️ Sorumluluk Reddi
 

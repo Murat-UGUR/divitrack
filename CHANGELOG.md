@@ -1,5 +1,18 @@
 # Değişiklik Günlüğü
 
+## [0.3.0] - 2026-10-21
+
+### Eklendi
+- Banka dökümü içe aktarma: kolon eşleme (tek tutar veya Borç/Alacak, kredi kartı için "giderler artı" seçeneği), baştaki hesap bilgisi satırlarını ve toplam satırlarını atlama, Windows-1254 dosya desteği
+- Döküm eşleme kuralları: açıklamada geçen metne göre otomatik kategori; önizlemede elle düzeltme; mükerrer kayıt koruması
+- Varlık karnesi: kalem başına ağırlık, getiri, reel getiri, temettü verimi ve kural işaretleri
+- Sağlık puanının aylık geçmişi ve grafiği
+
+### Değişti
+- Sayı okuma İngilizce biçimi de tanır (`1,234.56`, `1,234,567`)
+- Veritabanı şeması v3, JSON dışa aktarım biçimi v3 (kurallar dahil)
+- CI eylemleri güncel sürümlere taşındı
+
 ## [0.2.0] - 2026-10-21
 
 ### Eklendi

@@ -38,6 +38,10 @@
 
 **Bütçe.** `categories` (gelir/gider, giderlerde opsiyonel aylık bütçe) ve `cash_flows` (her zaman pozitif tutar; yön kategoriden gelir). `BudgetService` ay özeti, 12 aylık seyir, tasarruf oranı ve yatırılabilir tutarı (net tasarruf × yatırım payı) üretir; Aylık Plan sayfası bu tutarı `allocate`'e verir. Tutarlar TL'dir.
 
+**Banka dökümü.** `core.statement` dökümü okur (UTF-8 veya Windows-1254, `;`/`,`/sekme ayracı, baştaki hesap bilgisi satırlarını atlar), kullanıcının seçtiği kolonlardan işaretli tutar üretir (tek kolon veya Borç/Alacak; Türk bankalarının `15.000` biçimindeki binlik ayırıcısı dahil) ve tarihi okunamayan satırları (devreden bakiye, toplam) atlar. `category_rules` tablosundaki metin kuralları açıklamada Türkçe büyük/küçük harf duyarsız aranır, uzun kural önce denenir. Aynı tarih, tutar ve açıklamayla kayıtlı satır mükerrer sayılır. Kategori önceliği: önizlemede elle seçilen > kural > varsayılan; türü tutarın işaretiyle uyuşmayan seçim varsayılana düşer.
+
+**Puan geçmişi ve varlık karnesi.** Portföy Özeti her açıldığında o ayın puanı `score_history` tablosuna yazılır (aynı ay üzerine yazar). Varlık karnesi her açık kalem için ağırlık, nominal/reel getiri ve temettü verimini gösterir; tek kalem sınırı, atanmamış amaç, enflasyonun gerisinde kalma ve "temettü amacında ama temettü yok" durumlarını işaretler.
+
 **Yurt dışı temettü beyan sınırı.** TL dışı, "Ödendi" işaretli temettülerin yıllık brüt toplamı ödeme günü kuruyla TL'ye çevrilir ve kullanıcının girdiği sınırla karşılaştırılır. Sınır her yıl değiştiği için varsayılan değer yoktur.
 
 **Değer geçmişi.** Dashboard her açıldığında o günün toplamı `portfolio_snapshots` tablosuna yazılır (upsert). `SnapshotService.backfill` işlem defteri + Yahoo geçmiş kapanışları + geçmiş kurlarla ilk işlemden bugüne günlük seriyi yeniden oluşturur.
@@ -48,13 +52,15 @@
 assets (purpose) ──< transactions (BUY/SELL/BONUS/RIGHTS/REINVEST)
    └────────────< dividends
 categories ──< cash_flows        — gelir/gider ve aylık bütçe
+   └────────< category_rules    — döküm açıklaması → kategori
+score_history (month PK)         — aylık sağlık puanı
 cpi_monthly (month PK)           — TÜFE endeksi
 price_cache (symbol PK)          — hisseler, GC=F/SI=F, USDTRY=X…
 portfolio_snapshots (date, ccy)  — büyüme grafiği
 settings (key, value)            — para birimi, stopaj, hedefler, kurallar, tasarruf hedefi
 ```
 
-Şema v2, SQLite `CHECK` kısıtları `ALTER` ile değiştirilemediği için `assets`, `transactions` ve `dividends` tablolarını veriyi taşıyarak yeniden kurar. v1 veritabanları açılışta otomatik yükseltilir (`tests/integration/test_budget_insights.py::test_v1_database_upgrades_with_data`).
+Şema v2, SQLite `CHECK` kısıtları `ALTER` ile değiştirilemediği için `assets`, `transactions` ve `dividends` tablolarını veriyi taşıyarak yeniden kurar. v3 döküm kurallarını ve puan geçmişini ekler. Eski veritabanları açılışta otomatik yükseltilir (`tests/integration/test_budget_insights.py::test_v1_database_upgrades_with_data`).
 
 ## Test stratejisi
 
