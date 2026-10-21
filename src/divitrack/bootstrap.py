@@ -23,6 +23,7 @@ from divitrack.repositories.sqlite import (
     TransactionRepository,
 )
 from divitrack.services.budget_service import BudgetService
+from divitrack.services.cpi_service import CpiService
 from divitrack.services.dividend_engine import DividendEngine
 from divitrack.services.insights_service import InsightsService
 from divitrack.services.io.transfer import DataTransferService
@@ -48,6 +49,7 @@ class Container:
     budget: BudgetService
     insights: InsightsService
     cpi: CpiRepository
+    inflation: CpiService
 
     @property
     def base_currency(self) -> Currency:
@@ -62,15 +64,19 @@ class Container:
 
 
 def default_provider(settings: Settings) -> PriceProvider | None:
+    """Yahoo (hisse, ETF, maden, kur) + TEFAS (yatırım fonları). Çevrimdışı modda hiçbiri."""
     if settings.offline:
         return None
+    from divitrack.services.market.tefas_provider import PREFIX, CompositeProvider, TefasProvider
+
+    yahoo: PriceProvider | None = None
     try:
         from divitrack.services.market.yfinance_provider import YFinanceProvider
 
-        return YFinanceProvider()
+        yahoo = YFinanceProvider()
     except ImportError:
-        log.warning("yfinance kurulu değil — çevrimdışı modda çalışılıyor")
-        return None
+        log.warning("yfinance kurulu değil — yalnızca TEFAS fiyatları alınacak")
+    return CompositeProvider({PREFIX: TefasProvider()}, yahoo)
 
 
 def build_container(
@@ -109,4 +115,5 @@ def build_container(
         budget=budget,
         insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db)),
         cpi=cpi,
+        inflation=CpiService(cpi, settings_repo),
     )

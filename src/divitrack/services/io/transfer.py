@@ -46,6 +46,7 @@ DIV_COLUMNS = [
     "note",
 ]
 FLOW_COLUMNS = ["date", "category", "kind", "amount", "note"]
+SECRET_PREFIX = "secret."
 
 
 def _s(v: Decimal | None) -> str | None:
@@ -153,7 +154,8 @@ class DataTransferService:
                 }
                 for s in self.snapshots.list_all()
             ],
-            "settings": self.settings.all(),
+            # "secret." ile başlayan ayarlar (API anahtarları) yedeğe yazılmaz
+            "settings": {k: v for k, v in self.settings.all().items() if not k.startswith(SECRET_PREFIX)},
             "categories": [
                 {"id": c.id, "name": c.name, "kind": c.kind.value, "monthly_budget": _s(c.monthly_budget)}
                 for c in self.categories.list()

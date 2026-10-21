@@ -36,7 +36,7 @@ SYMBOL_HELP = {
     AssetClass.BIST_STOCK: "Örn. THYAO, TUPRS (.IS soneki otomatik eklenir)",
     AssetClass.US_STOCK: "Örn. AAPL, SCHD, VOO",
     AssetClass.PRECIOUS_METAL: "Hazır sembollerden birini seçin veya Yahoo sembolü girin (ör. GC=F)",
-    AssetClass.FUND: "TEFAS kodu (ör. TTE). Fiyat Yahoo'da yoksa manuel birim fiyat girin",
+    AssetClass.FUND: "TEFAS fon kodu (ör. TTE, AFT). Fiyat TEFAS'tan gelir; manuel fiyat girilirse o kullanılır",
     AssetClass.CASH: "Serbest ad: NAKIT-TRY, BES-FON1… (fiyat çekilmez)",
 }
 

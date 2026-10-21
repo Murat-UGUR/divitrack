@@ -24,6 +24,8 @@
 - gram altın/gümüşü ons × USDTRY'den türetir,
 - kurları doğrudan (`USDTRY=X`) veya ters (`TRYUSD=X`) sembolden bulur.
 
+`CompositeProvider` sembol önekine göre yönlendirir: `TEFAS:<kod>` → `TefasProvider` (yatırım fonları), diğerleri → `YFinanceProvider`. Bir sağlayıcının hatası diğerini durdurmaz. TEFAS 2026'da eski `BindHistoryInfo` uç noktasını kaldırdı; yeni `POST /api/funds/fonFiyatBilgiGetir` fon başına çalışır ve geçmişi `periyod` (1, 3, 6, 12, 36, 60 ay) ile verir. HTTP çağrıları stdlib `urllib` ile yapılır ve testlerde sahte `Transport` fonksiyonuyla değiştirilir.
+
 **Kur çevrimi.** Değerleme varlığın kendi para biriminde yapılır, raporlama para birimine güncel kurla çevrilir. K/Z yüzdesi bu yüzden varlığın kendi para birimindeki getiriyi gösterir. Kur etkisini de içeren TL bazlı bakış Analiz sayfasındadır (aşağıda).
 
 **Temettü projeksiyonu.** Son 12 ayın ödemeleri bir yıl ileri kaydırılır, mevcut adetle çarpılır. Kullanıcı bir varlık için gelecek tarihli "Beklenen" kayıt girmişse o varlık için tahmin üretilmez. Stopaj oranları `settings` tablosunda, varlık sınıfı bazında tutulur.
@@ -32,7 +34,7 @@
 
 **Amaçlar ve plan.** Her varlığın bir amacı vardır (`Purpose`: koruma, büyüme, temettü, deneme, atanmadı). Hedef paylar ve kurallar (`PlanRules`: tek kalem sınırı, sapma toleransı, beyan sınırı) `settings` tablosunda tutulur. `core.planning.allocate` yeni parayı satış yapmadan böler: önce hedefin altındaki amaçların açığı, para yetmezse açıklar oranında; kalan para hedef oranlarına göre.
 
-**Enflasyon.** `cpi_monthly` tablosu ay → TÜFE endeksi tutar (taban önemsiz, yalnızca oranlar kullanılır; eksik ay için önceki en yakın ay). `InsightsService.real_returns` her yeni para girişini işlem günü kuruyla TL'ye çevirip son TÜFE ayına taşır, satışları düşer ve güncel TL değerle karşılaştırır. Kur geçmişi alınamazsa güncel kur kullanılır ve satır işaretlenir. Uygulama TÜFE'yi internetten çekmez; kullanıcı girer.
+**Enflasyon.** `cpi_monthly` tablosu ay → TÜFE endeksi tutar (taban önemsiz, yalnızca oranlar kullanılır; eksik ay için önceki en yakın ay). `InsightsService.real_returns` her yeni para girişini işlem günü kuruyla TL'ye çevirip son TÜFE ayına taşır, satışları düşer ve güncel TL değerle karşılaştırır. Kur geçmişi alınamazsa güncel kur kullanılır ve satır işaretlenir. TÜFE elle girilebilir ya da `CpiService` ile TCMB EVDS'den (seri `TP.FG.J0`, 2003=100) alınır; anahtar `key` HTTP başlığında gönderilir, `secret.` önekli ayar olarak saklanır ve dışa aktarıma dahil edilmez.
 
 **Sağlık puanı.** Altı bileşen (amaç dağılımı 25, tek kalem 20, deneme bütçesi 10, enflasyon 20, çeşitlilik 10, tasarruf oranı 15). Her biri `linear_score` ile iyi/kötü eşikleri arasında doğrusal puanlanır; verisi olmayan bileşen toplama katılmaz ve puan kalanların üzerinden 100'e ölçeklenir. Her bileşen bir açıklama ve "puan nasıl artar" önerisi taşır.
 

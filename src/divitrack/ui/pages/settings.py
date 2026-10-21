@@ -168,17 +168,38 @@ def _rules() -> None:
             run_action(save, "Kurallar kaydedildi")
 
 
+def _evds() -> None:
+    c = get_container()
+    st.caption(
+        "EVDS ücretsizdir: evds3.tcmb.gov.tr adresinde üye olup profil sayfasından API anahtarı alın. "
+        "Anahtar yalnızca bu bilgisayardaki veritabanında tutulur, JSON yedeğine yazılmaz "
+        "(isterseniz `DIVITRACK_EVDS_API_KEY` ortam değişkeniyle de verebilirsiniz). Seri: TP.FG.J0."
+    )
+    if c.inflation.key_from_env:
+        st.info("API anahtarı ortam değişkeninden okunuyor.")
+    else:
+        with st.form("evds_key"):
+            key = st.text_input("EVDS API anahtarı", value=c.inflation.api_key, type="password")
+            if st.form_submit_button("Anahtarı kaydet"):
+                run_action(lambda: c.inflation.set_api_key(key), "Anahtar kaydedildi")
+    if st.button("TÜFE'yi EVDS'den güncelle", type="primary", disabled=not c.inflation.api_key):
+        with st.spinner("TCMB EVDS'den alınıyor…"):
+            run_action(lambda: flash(str(c.inflation.update_from_evds())))
+
+
 def _cpi() -> None:
     c = get_container()
     st.subheader("TÜFE (enflasyon endeksi)")
     index = c.cpi.all()
     last = latest_month(index)
     st.caption(
-        "Reel getiri için aylık TÜFE endeksi gerekir. TÜİK'in açıkladığı endeks değerini (2003=100) ya da "
-        "aylık % değişimi girin; uygulama internetten veri çekmez. "
-        + (f"Son girilen ay: **{last}**." if last else "Henüz veri yok.")
+        "Reel getiri için aylık TÜFE endeksi (2003=100) gerekir. TCMB EVDS anahtarınız varsa tek tıkla "
+        "güncelleyin; yoksa TÜİK'in açıkladığı endeksi veya aylık % değişimi elle girin. "
+        + (f"Son ay: **{last}**." if last else "Henüz veri yok.")
     )
-    tab_add, tab_table = st.tabs(["Ay ekle", "Tablo"])
+    tab_evds, tab_add, tab_table = st.tabs(["TCMB EVDS'den al", "Elle ekle", "Tablo"])
+    with tab_evds:
+        _evds()
     with tab_add, st.form("cpi_add", clear_on_submit=True):
         next_month = f"{date.today().year}-01"
         if last:

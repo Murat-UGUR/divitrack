@@ -23,7 +23,7 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Banka Dökümü** | Herhangi bir bankanın CSV dökümünü kolon eşleyerek içe aktarma (tek tutar veya Borç/Alacak), açıklamaya göre otomatik kategori kuralları, önizlemede elle düzeltme, mükerrer kayıt koruması |
 | **Aylık Plan** | Ayın net tasarrufundan yatırıma ayrılan tutarı satış yapmadan hedefe en çok yaklaştıracak şekilde amaçlara böler; aylık rutin listesi |
 | **Temettü Takibi** | Ödenen/beklenen kayıtlar, stopaj (varsayılan BIST %15, ABD %20 — ayarlanabilir), TTM verim ve maliyete göre verim, 24 aylık takvim grafiği, Yahoo geçmişinden otomatik kayıt önerisi |
-| **Canlı Veri** | `yfinance` ile fiyat, temettü geçmişi ve döviz kurları; SQLite önbelleği, ağ hatasında son bilinen fiyatla çalışma, tam çevrimdışı mod |
+| **Canlı Veri** | `yfinance` ile hisse/ETF/maden fiyatı, temettü geçmişi ve döviz kurları; **TEFAS** ile yatırım fonu fiyatları; **TCMB EVDS** ile TÜFE (kendi API anahtarınızla). SQLite önbelleği, ağ hatasında son bilinen fiyatla çalışma, tam çevrimdışı mod |
 | **Dashboard** | Toplam değer + günlük değişim, K/Z, 12 aylık net temettü beklentisi, sağlık puanı, dikkat edilecekler, varlık dağılımı, zaman içindeki değer grafiği |
 | **Vergi Ön İzleme** | Yurt dışı temettülerin yıllık brüt TL toplamı ve kendi girdiğiniz beyan sınırına göre doluluk |
 | **Veri Taşınabilirliği** | JSON tam yedek (birleştir/geri yükle), işlem, temettü ve gelir/gider CSV'leri (Excel'in `;` ayracı desteklenir), tek tıkla `.db` yedeği |
@@ -67,7 +67,7 @@ docker run -p 127.0.0.1:8501:8501 -v "$(pwd)/data:/app/data" divitrack
 | Gram altın / gümüş | `XAU-GRAM`, `XAG-GRAM` | `ons (GC=F / SI=F) × USDTRY ÷ 31,1035` ile türetilir (TRY) |
 | Ons altın / gümüş | `XAU-OZ`, `XAG-OZ` | Vadeli kontrat fiyatı (USD), spot'a yakın |
 | Nakit | `NAKIT-TRY` | Adet = tutar, fiyat = 1 |
-| Yatırım fonu | `TTE` | Sınıf: Yatırım Fonu. TEFAS fiyatı çekilmez; manuel birim fiyat girin |
+| Yatırım fonu | `TTE`, `AFT` | Sınıf: Yatırım Fonu. Fiyat ve geçmiş TEFAS'tan gelir (TL); manuel fiyat girilirse o kullanılır |
 | BES | `BES-FON1` | Manuel birim fiyat girilir, istenince güncellenir |
 
 ### CSV formatı
@@ -138,7 +138,8 @@ divitrack/
 
 - Tüm veriler `data/divitrack.db` içinde kalır; `.gitignore` tüm `*.db`, `*.csv`, `data/` ve `.env` dosyalarını dışlar.
 - Sunucu yalnızca `127.0.0.1`'e bağlanır; Streamlit telemetrisi kapalıdır.
-- Dışarıya giden tek trafik Yahoo Finance'e **yalnızca sembol adlarıyla** yapılan fiyat sorgularıdır. Adet, maliyet, işlem bilgisi asla gönderilmez. `DIVITRACK_OFFLINE=1` ile bu da kapatılabilir.
+- Dışarıya giden trafik yalnızca şunlardır: Yahoo Finance'e sembol adlarıyla fiyat sorgusu, TEFAS'a fon koduyla fiyat sorgusu ve (anahtar girdiyseniz) TCMB EVDS'ye TÜFE serisi sorgusu. Adet, maliyet, işlem, gelir/gider bilgisi asla gönderilmez. `DIVITRACK_OFFLINE=1` ile hepsi kapatılabilir.
+- EVDS API anahtarı yalnızca yerel veritabanında tutulur ve JSON yedeğine yazılmaz.
 
 ## 🧪 Geliştirme
 
@@ -161,11 +162,13 @@ Yeni bir veri sağlayıcısı eklemek için `core/ports.py` içindeki `PriceProv
 - [x] İşlem tarihindeki kurla TL bazlı maliyet ve TÜFE ile reel getiri
 - [x] Amaç bazlı hedef dağılım ve yeni parayla dengeleme önerisi
 - [x] Gelir/gider ve bütçe modülü, aylık yatırım planı
-- [ ] TEFAS entegrasyonu (BES/yatırım fonu fiyatları)
-- [ ] TÜFE'nin resmi kaynaktan otomatik alınması
+- [x] TEFAS entegrasyonu (yatırım fonu fiyatları ve geçmişi)
+- [x] TÜFE'nin TCMB EVDS'den otomatik alınması
 - [x] Banka dökümü kolon eşleme sihirbazı ve kategori kuralları
 - [x] Varlık karnesi ve aylık puan geçmişi
-- [ ] Excel (.xlsx) dökümleri
+- [x] Excel (.xlsx) dökümleri
+- [ ] BES fonları (TEFAS `EMK` türü) ve fon adının otomatik doldurulması
+- [ ] Hedef tarihli birikim planları (ev, araba, acil durum fonu)
 
 ## ⚠️ Sorumluluk Reddi
 

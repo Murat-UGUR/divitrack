@@ -52,11 +52,52 @@ def sniff_delimiter(text: str) -> str:
     return max(counts, key=lambda d: counts[d]) if any(counts.values()) else ","
 
 
+XLSX_MAGIC = b"PK\x03\x04"
+XLS_MAGIC = b"\xd0\xcf\x11\xe0"
+
+
+def _cell(value: object) -> str:
+    """Excel hücresini metne çevirir. Sayılar Türkçe ondalıkla yazılır ki "15.125" binlik sanılmasın."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int | float | Decimal):
+        text = format(Decimal(str(value)).normalize(), "f")
+        return text.replace(".", ",")
+    return " ".join(str(value).split())
+
+
+def _xlsx_rows(data: bytes) -> list[list[str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:  # pragma: no cover — requirements.txt'te var
+        raise ImportFormatError("Excel dosyaları için openpyxl kurulu olmalı") from exc
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ImportFormatError(f"Excel dosyası okunamadı: {exc}") from exc
+    try:
+        sheet = wb.worksheets[0]
+        return [[_cell(v) for v in row] for row in sheet.iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+
 def read_table(data: str | bytes) -> tuple[list[str], list[list[str]]]:
-    """CSV'yi başlık + satırlar olarak okur. Başlık, en az iki dolu hücresi olan ilk satırdır
-    (bankaların dökümün başına koyduğu hesap bilgisi satırları atlanır)."""
-    text = decode(data)
-    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=sniff_delimiter(text))]
+    """CSV veya Excel (.xlsx, ilk sayfa) dökümünü başlık + satırlar olarak okur. Başlık, en az iki
+    dolu hücresi olan ilk satırdır (bankaların dökümün başına koyduğu hesap bilgisi satırları atlanır)."""
+    if isinstance(data, bytes) and data.startswith(XLS_MAGIC):
+        raise ImportFormatError("Eski .xls biçimi desteklenmiyor; dosyayı Excel'de .xlsx veya CSV olarak kaydedin")
+    if isinstance(data, bytes) and data.startswith(XLSX_MAGIC):
+        rows = _xlsx_rows(data)
+    else:
+        text = decode(data)
+        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=sniff_delimiter(text))]
     rows = [r for r in rows if any(r)]
     width = max((len(r) for r in rows), default=0)
     start = next((i for i, r in enumerate(rows) if sum(1 for c in r if c) >= min(2, width) and len(r) == width), None)

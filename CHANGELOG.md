@@ -1,5 +1,17 @@
 # Değişiklik Günlüğü
 
+## [0.4.0] - 2026-10-21
+
+### Eklendi
+- TEFAS entegrasyonu: yatırım fonlarının güncel fiyatı ve geçmişi otomatik (yeni `fonFiyatBilgiGetir` API'si); fon pozisyonları değer geçmişine ve reel getiriye dahil
+- Sembol önekine göre sağlayıcı yönlendirme (`TEFAS:` → TEFAS, diğerleri → Yahoo); bir kaynağın hatası diğerini etkilemez
+- TÜFE'nin TCMB EVDS'den tek tıkla alınması (kişisel API anahtarıyla; anahtar yedeğe yazılmaz)
+- Banka dökümlerinde Excel (.xlsx) desteği
+
+### Değişti
+- Yatırım fonu varlıkları her zaman TL cinsinden tutulur
+- `openpyxl` bağımlılığı eklendi
+
 ## [0.3.0] - 2026-10-21
 
 ### Eklendi

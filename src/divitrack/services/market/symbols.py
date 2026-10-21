@@ -37,6 +37,8 @@ def provider_symbol(asset: Asset) -> str | None:
     sym = asset.symbol
     if asset.asset_class is AssetClass.BIST_STOCK:
         return sym if sym.endswith(".IS") else f"{sym}.IS"
+    if asset.asset_class is AssetClass.FUND:
+        return f"TEFAS:{sym}"  # TEFAS fon kodu (TTE, AFT…); fiyatı TefasProvider getirir
     if asset.asset_class is AssetClass.PRECIOUS_METAL:
         if sym in DERIVED_GRAM_METALS:
             return None

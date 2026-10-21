@@ -307,12 +307,12 @@ def _guess(header: list[str], key: str, fallback: int | None) -> int | None:
 def _statement() -> None:
     c = get_container()
     st.caption(
-        "Bankanızdan veya kredi kartınızdan aldığınız CSV dökümünü yükleyin, kolonları eşleyin, kategorileri "
-        "kontrol edip içe aktarın. Açıklamada geçen metne göre kategori atayan kuralları **Kategoriler & "
-        "kurallar** sekmesinden tanımlayabilirsiniz. Aynı tarih, tutar ve açıklamayla kayıtlı satırlar mükerrer "
-        "sayılır."
+        "Bankanızdan veya kredi kartınızdan aldığınız CSV ya da Excel (.xlsx) dökümünü yükleyin, kolonları "
+        "eşleyin, kategorileri kontrol edip içe aktarın. Açıklamada geçen metne göre kategori atayan "
+        "kuralları **Kategoriler & kurallar** sekmesinden tanımlayabilirsiniz. Aynı tarih, tutar ve "
+        "açıklamayla kayıtlı satırlar mükerrer sayılır."
     )
-    upload = st.file_uploader("Döküm (CSV)", type=["csv", "txt"], key="stmt_file")
+    upload = st.file_uploader("Döküm (CSV veya Excel .xlsx)", type=["csv", "txt", "xlsx"], key="stmt_file")
     if upload is None:
         return
     try:

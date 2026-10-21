@@ -124,6 +124,8 @@ class PortfolioService:
             asset.symbol = asset.symbol.removesuffix(".IS")
             if asset.currency is not Currency.TRY:
                 raise ValidationError("BIST hisseleri TRY cinsinden olmalı")
+        if asset.asset_class is AssetClass.FUND:
+            asset.currency = Currency.TRY  # TEFAS fonları TL fiyatlanır
         if asset.asset_class is AssetClass.PRECIOUS_METAL and asset.symbol in METAL_PRESETS:
             preset_name, preset_ccy = METAL_PRESETS[asset.symbol]
             asset.name = asset.name or preset_name
