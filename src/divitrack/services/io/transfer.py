@@ -1,4 +1,4 @@
-"""Veri taşınabilirliği: JSON tam yedek, CSV işlem/temettü dışa-içe aktarma, DB yedeği."""
+"""Veri taşınabilirliği: JSON tam yedek, CSV işlem/temettü/gelir-gider dışa-içe aktarma, DB yedeği."""
 
 from __future__ import annotations
 
@@ -11,13 +11,17 @@ from decimal import Decimal
 from typing import Any
 
 from divitrack.core.calculations import compute_position
-from divitrack.core.entities import Asset, Dividend, Snapshot, Transaction
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, TxType
+from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Snapshot, Transaction
+from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import DivitrackError, ImportFormatError
+from divitrack.core.inflation import parse_month
 from divitrack.core.money import to_decimal
 from divitrack.db.database import Database
 from divitrack.repositories.sqlite import (
     AssetRepository,
+    CashFlowRepository,
+    CategoryRepository,
+    CpiRepository,
     DividendRepository,
     SettingsRepository,
     SnapshotRepository,
@@ -25,7 +29,7 @@ from divitrack.repositories.sqlite import (
 )
 
 FORMAT_NAME = "divitrack-export"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2  # v2: amaç, kurumsal işlemler, bütçe ve TÜFE
 
 TX_COLUMNS = ["date", "symbol", "asset_class", "currency", "type", "quantity", "price", "fee", "note"]
 DIV_COLUMNS = [
@@ -40,6 +44,7 @@ DIV_COLUMNS = [
     "status",
     "note",
 ]
+FLOW_COLUMNS = ["date", "category", "kind", "amount", "note"]
 
 
 def _s(v: Decimal | None) -> str | None:
@@ -52,14 +57,20 @@ class ImportReport:
     transactions: int = 0
     dividends: int = 0
     snapshots: int = 0
+    cash_flows: int = 0
+    categories_created: int = 0
     skipped: int = 0
 
     def __str__(self) -> str:
-        return (
-            f"{self.assets_created} yeni varlık, {self.transactions} işlem, "
-            f"{self.dividends} temettü, {self.snapshots} kayıt içe aktarıldı"
-            + (f"; {self.skipped} satır atlandı" if self.skipped else "")
-        )
+        parts = [
+            f"{self.assets_created} yeni varlık",
+            f"{self.transactions} işlem",
+            f"{self.dividends} temettü",
+            f"{self.snapshots} kayıt",
+        ]
+        if self.cash_flows or self.categories_created:
+            parts.append(f"{self.cash_flows} gelir/gider")
+        return ", ".join(parts) + " içe aktarıldı" + (f"; {self.skipped} satır atlandı" if self.skipped else "")
 
 
 class DataTransferService:
@@ -71,8 +82,14 @@ class DataTransferService:
         dividends: DividendRepository,
         snapshots: SnapshotRepository,
         settings: SettingsRepository,
+        categories: CategoryRepository,
+        flows: CashFlowRepository,
+        cpi: CpiRepository,
     ) -> None:
         self.db = db
+        self.categories = categories
+        self.flows = flows
+        self.cpi = cpi
         self.assets = assets
         self.transactions = transactions
         self.dividends = dividends
@@ -94,6 +111,7 @@ class DataTransferService:
                     "asset_class": a.asset_class.value,
                     "currency": a.currency.value,
                     "manual_price": _s(a.manual_price),
+                    "purpose": a.purpose.value,
                 }
                 for a in assets
             ],
@@ -133,6 +151,15 @@ class DataTransferService:
                 for s in self.snapshots.list_all()
             ],
             "settings": self.settings.all(),
+            "categories": [
+                {"id": c.id, "name": c.name, "kind": c.kind.value, "monthly_budget": _s(c.monthly_budget)}
+                for c in self.categories.list()
+            ],
+            "cash_flows": [
+                {"category_id": f.category_id, "date": f.flow_date.isoformat(), "amount": _s(f.amount), "note": f.note}
+                for f in reversed(self.flows.list())
+            ],
+            "cpi": {m: _s(v) for m, v in sorted(self.cpi.all().items())},
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -164,6 +191,7 @@ class DataTransferService:
                     asset_class=AssetClass(a["asset_class"]),
                     currency=Currency(a["currency"]),
                     manual_price=to_decimal(a["manual_price"]) if a.get("manual_price") else None,
+                    purpose=Purpose(a.get("purpose") or Purpose.UNASSIGNED),
                 ),
             )
             for a in data.get("assets", [])
@@ -191,7 +219,23 @@ class DataTransferService:
             for s in data.get("snapshots", [])
         ]
         settings = {str(k): str(v) for k, v in (data.get("settings") or {}).items()}
-        return assets, txs, divs, snaps, settings
+        categories = [
+            (
+                int(c["id"]),
+                Category(
+                    c["name"],
+                    FlowKind(c["kind"]),
+                    to_decimal(c["monthly_budget"]) if c.get("monthly_budget") else None,
+                ),
+            )
+            for c in data.get("categories", [])
+        ]
+        flows = [
+            (int(f["category_id"]), date.fromisoformat(f["date"]), to_decimal(f["amount"]), f.get("note", ""))
+            for f in data.get("cash_flows", [])
+        ]
+        cpi = {parse_month(m): to_decimal(v) for m, v in (data.get("cpi") or {}).items()}
+        return assets, txs, divs, snaps, settings, categories, flows, cpi
 
     def _apply(
         self,
@@ -200,6 +244,9 @@ class DataTransferService:
         divs: list[tuple[int, dict[str, Any]]],
         snaps: list[Snapshot],
         settings: dict[str, str],
+        categories: list[tuple[int, Category]],
+        flows: list[tuple[int, date, Decimal, str]],
+        cpi: dict[str, Decimal],
     ) -> ImportReport:
         report = ImportReport()
         id_map: dict[int, int] = {}
@@ -251,6 +298,30 @@ class DataTransferService:
         report.snapshots = len(snaps)
         for k, v in settings.items():
             self.settings.set(k, v)
+
+        cat_map: dict[int, int] = {}
+        for old_id, cat in categories:
+            existing_cat = self.categories.find(cat.name)
+            if existing_cat is None:
+                existing_cat = self.categories.add(cat)
+                report.categories_created += 1
+            elif cat.monthly_budget is not None:
+                existing_cat.monthly_budget = cat.monthly_budget
+                self.categories.update(existing_cat)
+            assert existing_cat.id is not None
+            cat_map[old_id] = existing_cat.id
+        existing_flows = {(f.category_id, f.flow_date, f.amount, f.note) for f in self.flows.list()}
+        new_flows: list[CashFlow] = []
+        for old_cat, d, amount, note in flows:
+            cid = cat_map.get(old_cat)
+            if cid is None or (cid, d, amount, note) in existing_flows:
+                report.skipped += 1
+                continue
+            new_flows.append(CashFlow(cid, d, amount, note))
+        self.flows.add_many(new_flows)
+        report.cash_flows = len(new_flows)
+        if cpi:
+            self.cpi.replace_all({**self.cpi.all(), **cpi})
         return report
 
     def _validate_ledger(self, new_txs: list[Transaction]) -> None:
@@ -262,7 +333,15 @@ class DataTransferService:
 
     def _wipe(self) -> None:
         with self.db.transaction() as c:
-            for table in ("transactions", "dividends", "portfolio_snapshots", "assets", "price_cache"):
+            for table in (
+                "transactions",
+                "dividends",
+                "portfolio_snapshots",
+                "assets",
+                "price_cache",
+                "cash_flows",
+                "cpi_monthly",
+            ):
                 c.execute(f"DELETE FROM {table}")
 
     # ================================================================== CSV
@@ -374,6 +453,76 @@ class DataTransferService:
             tx.asset_id = existing.id
             self.transactions.add(tx)
             report.transactions += 1
+        return report
+
+    def export_cash_flows_csv(self) -> str:
+        cats = {c.id: c for c in self.categories.list()}
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=FLOW_COLUMNS)
+        w.writeheader()
+        for f in reversed(self.flows.list()):
+            c = cats[f.category_id]
+            w.writerow(
+                {
+                    "date": f.flow_date.isoformat(),
+                    "category": c.name,
+                    "kind": c.kind.value,
+                    "amount": _s(f.amount),
+                    "note": f.note,
+                }
+            )
+        return buf.getvalue()
+
+    def import_cash_flows_csv(self, text: str | bytes) -> ImportReport:
+        """CSV kolonları: date,category,amount[,kind,note].
+
+        Tutarın işareti yok sayılır (banka dökümlerinde gider eksi gelir). Kategori yoksa oluşturulur;
+        türü `kind` kolonundan (INCOME/EXPENSE veya Gelir/Gider), o da yoksa tutarın işaretinden
+        (eksi → gider) belirlenir. Hatalı satır varsa hiçbir şey yazılmaz.
+        """
+        if isinstance(text, bytes):
+            text = text.decode("utf-8-sig")
+        sample = text[:2048]
+        delimiter = ";" if sample.count(";") > sample.count(",") else ","
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        fields = {f.strip().lower() for f in reader.fieldnames or []}
+        missing = {"date", "category", "amount"} - fields
+        if missing:
+            raise ImportFormatError(f"Eksik kolon(lar): {', '.join(sorted(missing))}")
+        kinds = {"INCOME": FlowKind.INCOME, "GELIR": FlowKind.INCOME, "GELİR": FlowKind.INCOME}
+        kinds |= {"EXPENSE": FlowKind.EXPENSE, "GIDER": FlowKind.EXPENSE, "GİDER": FlowKind.EXPENSE}
+
+        parsed: list[tuple[str, FlowKind | None, CashFlow]] = []
+        for lineno, raw in enumerate(reader, start=2):
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+            if not any(row.values()):
+                continue
+            try:
+                amount = to_decimal(row["amount"], field="amount")
+                kind_text = row.get("kind", "").upper()
+                if kind_text and kind_text not in kinds:
+                    raise ValueError(f"Bilinmeyen tür: {row['kind']}")
+                kind = kinds.get(kind_text) or (FlowKind.EXPENSE if amount < 0 else None)
+                name = " ".join(row["category"].split())
+                if not name:
+                    raise ValueError("Kategori boş")
+                flow = CashFlow(0, date.fromisoformat(row["date"]), abs(amount), row.get("note", ""))
+            except (ValueError, DivitrackError) as exc:
+                raise ImportFormatError(f"Satır {lineno}: {exc}") from exc
+            parsed.append((name, kind, flow))
+
+        report = ImportReport()
+        for name, kind, flow in parsed:
+            cat = self.categories.find(name)
+            if cat is None:
+                cat = self.categories.add(Category(name, kind or FlowKind.INCOME))
+                report.categories_created += 1
+            elif kind is not None and cat.kind is not kind:
+                raise ImportFormatError(f"'{cat.name}' kategorisi {cat.kind.label.lower()} türünde")
+            assert cat.id is not None
+            flow.category_id = cat.id
+        self.flows.add_many([f for _, _, f in parsed])
+        report.cash_flows = len(parsed)
         return report
 
     # ================================================================== DB yedeği

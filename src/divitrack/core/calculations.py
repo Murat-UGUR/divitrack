@@ -19,7 +19,8 @@ def _ordered(transactions: Iterable[Transaction]) -> list[Transaction]:
 def compute_position(transactions: Iterable[Transaction], *, as_of: date | None = None) -> PositionState:
     """Ağırlıklı ortalama maliyet yöntemiyle pozisyonu hesaplar.
 
-    - Alış komisyonu maliyete eklenir.
+    - Alış komisyonu maliyete eklenir. Bedelli ve temettüden alış da alış gibi işlenir.
+    - Bedelsiz/bölünme: adet artar, toplam maliyet değişmez (ortalama maliyet düşer).
     - Satışta gerçekleşen K/Z = (satış tutarı - komisyon) - (ortalama maliyet × adet).
     - Pozisyon tamamen kapanınca ortalama maliyet sıfırlanır.
     """
@@ -30,7 +31,7 @@ def compute_position(transactions: Iterable[Transaction], *, as_of: date | None 
         if state.first_trade is None:
             state.first_trade = tx.trade_date
         state.fees_paid += tx.fee
-        if tx.tx_type is TxType.BUY:
+        if tx.tx_type is not TxType.SELL:
             state.cost_basis += tx.gross_amount + tx.fee
             state.quantity += tx.quantity
             state.avg_cost = state.cost_basis / state.quantity

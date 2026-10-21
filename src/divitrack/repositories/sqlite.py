@@ -7,9 +7,9 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
-from divitrack.core.entities import Asset, Dividend, ProviderQuote, Snapshot, Transaction
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, TxType
-from divitrack.core.exceptions import DuplicateError, NotFoundError
+from divitrack.core.entities import Asset, CashFlow, Category, Dividend, ProviderQuote, Snapshot, Transaction
+from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
+from divitrack.core.exceptions import DuplicateError, NotFoundError, ValidationError
 from divitrack.db.database import Database
 
 
@@ -41,14 +41,22 @@ class AssetRepository(_Repo):
             asset_class=AssetClass(r["asset_class"]),
             currency=Currency(r["currency"]),
             manual_price=_dec(r["manual_price"]),
+            purpose=Purpose(r["purpose"]),
         )
 
     def add(self, asset: Asset) -> Asset:
         try:
             with self.db.transaction() as c:
                 cur = c.execute(
-                    "INSERT INTO assets(symbol,name,asset_class,currency,manual_price) VALUES (?,?,?,?,?)",
-                    (asset.symbol, asset.name, asset.asset_class.value, asset.currency.value, _s(asset.manual_price)),
+                    "INSERT INTO assets(symbol,name,asset_class,currency,manual_price,purpose) VALUES (?,?,?,?,?,?)",
+                    (
+                        asset.symbol,
+                        asset.name,
+                        asset.asset_class.value,
+                        asset.currency.value,
+                        _s(asset.manual_price),
+                        asset.purpose.value,
+                    ),
                 )
         except sqlite3.IntegrityError as exc:
             raise DuplicateError(f"{asset.symbol} ({asset.asset_class.label}) zaten kayıtlı") from exc
@@ -58,13 +66,14 @@ class AssetRepository(_Repo):
     def update(self, asset: Asset) -> Asset:
         with self.db.transaction() as c:
             cur = c.execute(
-                "UPDATE assets SET symbol=?, name=?, asset_class=?, currency=?, manual_price=? WHERE id=?",
+                "UPDATE assets SET symbol=?, name=?, asset_class=?, currency=?, manual_price=?, purpose=? WHERE id=?",
                 (
                     asset.symbol,
                     asset.name,
                     asset.asset_class.value,
                     asset.currency.value,
                     _s(asset.manual_price),
+                    asset.purpose.value,
                     asset.id,
                 ),
             )
@@ -306,3 +315,125 @@ class SettingsRepository(_Repo):
     def all(self) -> dict[str, str]:
         with self.db.transaction() as c:
             return {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings")}
+
+
+# --------------------------------------------------------------------------- budget
+class CategoryRepository(_Repo):
+    @staticmethod
+    def _row(r: sqlite3.Row) -> Category:
+        return Category(id=r["id"], name=r["name"], kind=FlowKind(r["kind"]), monthly_budget=_dec(r["monthly_budget"]))
+
+    def add(self, cat: Category) -> Category:
+        try:
+            with self.db.transaction() as c:
+                cur = c.execute(
+                    "INSERT INTO categories(name,kind,monthly_budget) VALUES (?,?,?)",
+                    (cat.name, cat.kind.value, _s(cat.monthly_budget)),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateError(f"'{cat.name}' kategorisi zaten var") from exc
+        cat.id = cur.lastrowid
+        return cat
+
+    def update(self, cat: Category) -> Category:
+        try:
+            with self.db.transaction() as c:
+                cur = c.execute(
+                    "UPDATE categories SET name=?, kind=?, monthly_budget=? WHERE id=?",
+                    (cat.name, cat.kind.value, _s(cat.monthly_budget), cat.id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateError(f"'{cat.name}' kategorisi zaten var") from exc
+        if cur.rowcount == 0:
+            raise NotFoundError(f"Kategori bulunamadı: {cat.id}")
+        return cat
+
+    def delete(self, category_id: int) -> None:
+        try:
+            with self.db.transaction() as c:
+                c.execute("DELETE FROM categories WHERE id=?", (category_id,))
+        except sqlite3.IntegrityError as exc:
+            raise ValidationError("Bu kategoride kayıt var; önce kayıtları silin veya taşıyın") from exc
+
+    def get(self, category_id: int) -> Category:
+        with self.db.transaction() as c:
+            r = c.execute("SELECT * FROM categories WHERE id=?", (category_id,)).fetchone()
+        if r is None:
+            raise NotFoundError(f"Kategori bulunamadı: {category_id}")
+        return self._row(r)
+
+    def find(self, name: str) -> Category | None:
+        with self.db.transaction() as c:
+            r = c.execute("SELECT * FROM categories WHERE lower(name)=lower(?)", (" ".join(name.split()),)).fetchone()
+        return None if r is None else self._row(r)
+
+    def list(self) -> list[Category]:
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT * FROM categories ORDER BY kind DESC, name").fetchall()
+        return [self._row(r) for r in rows]
+
+
+class CashFlowRepository(_Repo):
+    @staticmethod
+    def _row(r: sqlite3.Row) -> CashFlow:
+        return CashFlow(
+            id=r["id"],
+            category_id=r["category_id"],
+            flow_date=date.fromisoformat(r["flow_date"]),
+            amount=Decimal(r["amount"]),
+            note=r["note"],
+        )
+
+    def add(self, flow: CashFlow) -> CashFlow:
+        return self.add_many([flow])[0]
+
+    def add_many(self, flows: Sequence[CashFlow]) -> list[CashFlow]:
+        with self.db.transaction() as c:
+            for f in flows:
+                cur = c.execute(
+                    "INSERT INTO cash_flows(category_id,flow_date,amount,note) VALUES (?,?,?,?)",
+                    (f.category_id, f.flow_date.isoformat(), _s(f.amount), f.note),
+                )
+                f.id = cur.lastrowid
+        return list(flows)
+
+    def delete(self, flow_id: int) -> None:
+        with self.db.transaction() as c:
+            c.execute("DELETE FROM cash_flows WHERE id=?", (flow_id,))
+
+    def list(self, start: date | None = None, end: date | None = None) -> list[CashFlow]:
+        """`start` dahil, `end` hariç tarih aralığındaki kayıtlar (yeniden eskiye)."""
+        sql = "SELECT * FROM cash_flows WHERE 1=1"
+        params: list[object] = []
+        if start is not None:
+            sql += " AND flow_date >= ?"
+            params.append(start.isoformat())
+        if end is not None:
+            sql += " AND flow_date < ?"
+            params.append(end.isoformat())
+        sql += " ORDER BY flow_date DESC, id DESC"
+        with self.db.transaction() as c:
+            rows = c.execute(sql, params).fetchall()
+        return [self._row(r) for r in rows]
+
+
+class CpiRepository(_Repo):
+    def all(self) -> dict[str, Decimal]:
+        with self.db.transaction() as c:
+            return {r["month"]: Decimal(r["value"]) for r in c.execute("SELECT month, value FROM cpi_monthly")}
+
+    def replace_all(self, index: dict[str, Decimal]) -> None:
+        with self.db.transaction() as c:
+            c.execute("DELETE FROM cpi_monthly")
+            c.executemany(
+                "INSERT INTO cpi_monthly(month, value) VALUES (?, ?)",
+                [(m, _s(v)) for m, v in sorted(index.items())],
+            )
+
+    def upsert(self, month: str, value: Decimal) -> None:
+        with self.db.transaction() as c:
+            c.execute(
+                "INSERT INTO cpi_monthly(month, value) VALUES (?, ?) "
+                "ON CONFLICT(month) DO UPDATE SET value=excluded.value",
+                (month, _s(value)),
+            )

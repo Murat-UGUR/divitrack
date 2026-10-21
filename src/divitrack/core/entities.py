@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, TxType
+from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import ValidationError
 from divitrack.core.money import ONE, ZERO, pct
 
@@ -24,6 +24,7 @@ class Asset:
     currency: Currency
     name: str = ""
     manual_price: Decimal | None = None
+    purpose: Purpose = Purpose.UNASSIGNED
     id: int | None = None
 
     def __post_init__(self) -> None:
@@ -32,6 +33,7 @@ class Asset:
             raise ValidationError("Sembol boş olamaz")
         self.asset_class = AssetClass(self.asset_class)
         self.currency = Currency(self.currency)
+        self.purpose = Purpose(self.purpose)
         if self.manual_price is not None and self.manual_price < 0:
             raise ValidationError("Manuel fiyat negatif olamaz")
 
@@ -53,6 +55,8 @@ class Transaction:
 
     def __post_init__(self) -> None:
         self.tx_type = TxType(self.tx_type)
+        if self.tx_type is TxType.BONUS:
+            self.price = ZERO  # bedelsiz/bölünme: maliyetsiz adet
         if self.quantity <= 0:
             raise ValidationError("Adet sıfırdan büyük olmalı")
         if self.price < 0:
@@ -167,3 +171,36 @@ class DividendHistory:
 
     symbol: str
     payments: list[tuple[date, Decimal]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class Category:
+    """Gelir veya gider kategorisi. `monthly_budget` yalnızca giderlerde anlamlıdır (aylık üst sınır)."""
+
+    name: str
+    kind: FlowKind
+    monthly_budget: Decimal | None = None
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        self.name = " ".join(self.name.split())
+        if not self.name:
+            raise ValidationError("Kategori adı boş olamaz")
+        self.kind = FlowKind(self.kind)
+        if self.monthly_budget is not None and self.monthly_budget < 0:
+            raise ValidationError("Bütçe negatif olamaz")
+
+
+@dataclass(slots=True)
+class CashFlow:
+    """Bir gelir veya gider kaydı. Tutar her zaman pozitiftir; yönü kategoriden gelir."""
+
+    category_id: int
+    flow_date: date
+    amount: Decimal
+    note: str = ""
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.amount <= 0:
+            raise ValidationError("Tutar sıfırdan büyük olmalı")

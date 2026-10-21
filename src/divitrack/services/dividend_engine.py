@@ -30,6 +30,7 @@ DEFAULT_WITHHOLDING: dict[AssetClass, Decimal] = {
     AssetClass.BIST_STOCK: Decimal("0.15"),
     AssetClass.US_STOCK: Decimal("0.20"),
     AssetClass.PRECIOUS_METAL: ZERO,
+    AssetClass.FUND: ZERO,
     AssetClass.CASH: ZERO,
 }
 WITHHOLDING_KEY = "withholding.{}"

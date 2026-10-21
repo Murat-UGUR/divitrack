@@ -11,13 +11,18 @@ from divitrack.core.ports import PriceProvider
 from divitrack.db.database import Database
 from divitrack.repositories.sqlite import (
     AssetRepository,
+    CashFlowRepository,
+    CategoryRepository,
+    CpiRepository,
     DividendRepository,
     PriceCacheRepository,
     SettingsRepository,
     SnapshotRepository,
     TransactionRepository,
 )
+from divitrack.services.budget_service import BudgetService
 from divitrack.services.dividend_engine import DividendEngine
+from divitrack.services.insights_service import InsightsService
 from divitrack.services.io.transfer import DataTransferService
 from divitrack.services.market.market_data_service import MarketDataService
 from divitrack.services.portfolio_service import PortfolioService
@@ -38,6 +43,9 @@ class Container:
     dividends: DividendEngine
     snapshots: SnapshotService
     transfer: DataTransferService
+    budget: BudgetService
+    insights: InsightsService
+    cpi: CpiRepository
 
     @property
     def base_currency(self) -> Currency:
@@ -78,8 +86,13 @@ def build_container(
     snaps = SnapshotRepository(db)
     settings_repo = SettingsRepository(db)
 
+    categories = CategoryRepository(db)
+    flows = CashFlowRepository(db)
+    cpi = CpiRepository(db)
+
     market = MarketDataService(provider, PriceCacheRepository(db), settings.price_cache_ttl_min)
     portfolio = PortfolioService(assets, txs, market)
+    budget = BudgetService(categories, flows, settings_repo)
     return Container(
         settings=settings,
         db=db,
@@ -88,5 +101,8 @@ def build_container(
         portfolio=portfolio,
         dividends=DividendEngine(divs, settings_repo, provider),
         snapshots=SnapshotService(snaps, portfolio),
-        transfer=DataTransferService(db, assets, txs, divs, snaps, settings_repo),
+        transfer=DataTransferService(db, assets, txs, divs, snaps, settings_repo, categories, flows, cpi),
+        budget=budget,
+        insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo),
+        cpi=cpi,
     )
