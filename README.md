@@ -21,6 +21,7 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Dikkat Edilecekler** | Hedef sapması, yoğunlaşma, fiyatsız varlık, eski TÜFE, aşılan bütçe, yaklaşan temettü ve beyan sınırı uyarıları |
 | **Bütçe** | Gelir/gider kategorileri, aylık kategori bütçeleri, tasarruf oranı, 12 aylık seyir |
 | **Banka Dökümü** | Herhangi bir bankanın CSV dökümünü kolon eşleyerek içe aktarma (tek tutar veya Borç/Alacak), açıklamaya göre otomatik kategori kuralları, önizlemede elle düzeltme, mükerrer kayıt koruması |
+| **Birikim Hedefleri** | Ev peşinatı, acil durum fonu gibi hedefler: bağlı varlıkların değeriyle ilerleme, kalan ay, aylık gereken tutar ve son ayların tasarruf hızıyla "yolunda / geride" durumu |
 | **Aylık Plan** | Ayın net tasarrufundan yatırıma ayrılan tutarı satış yapmadan hedefe en çok yaklaştıracak şekilde amaçlara böler; aylık rutin listesi |
 | **Temettü Takibi** | Ödenen/beklenen kayıtlar, stopaj (varsayılan BIST %15, ABD %20 — ayarlanabilir), TTM verim ve maliyete göre verim, 24 aylık takvim grafiği, Yahoo geçmişinden otomatik kayıt önerisi |
 | **Canlı Veri** | `yfinance` ile hisse/ETF/maden fiyatı, temettü geçmişi ve döviz kurları; **TEFAS** ile yatırım fonu fiyatları; **TCMB EVDS** ile TÜFE (kendi API anahtarınızla). SQLite önbelleği, ağ hatasında son bilinen fiyatla çalışma, tam çevrimdışı mod |
@@ -54,7 +55,7 @@ docker run -p 127.0.0.1:8501:8501 -v "$(pwd)/data:/app/data" divitrack
 2. **Varlıklar & İşlemler → Varlıklar**: varlığı tanımlayın ve amacını seçin (ör. BIST `THYAO` → Büyüme, `XAU-GRAM` → Koruma).
 3. **Yeni İşlem**: alış/satış ve kurumsal işlemleri girin. Ondalık için `12,5` veya `12.5` yazabilirsiniz.
 4. **Bütçe**: ayın gelir ve giderlerini girin ya da *Banka dökümü* sekmesinden bankanızın CSV'sini yükleyin. Sık geçen açıklamalar için kural tanımlayın (*migros* → Market); sonraki dökümler otomatik kategorilenir.
-5. **Aylık Plan**: bütçeden kalan tutarın amaçlara nasıl bölüneceğini görün, alımları yapıp işlem olarak kaydedin.
+5. **Aylık Plan**: bütçeden kalan tutarın amaçlara nasıl bölüneceğini görün, alımları yapıp işlem olarak kaydedin. Birikim hedeflerinizi tanımlayıp ilgili varlıkları bağlayın.
 6. **Portföy Özeti / Analiz**: sağlık puanı, uyarılar, reel getiri ve senaryolar. Değer grafiği için *Geçmişi işlemlerden yeniden oluştur*.
 7. **Temettüler**: *Geçmişten Aktar* sekmesi, elde tuttuğunuz döneme denk gelen ödemeleri tek tıkla kaydeder; beyan sınırı paneli yurt dışı temettüleri izler.
 
@@ -67,8 +68,8 @@ docker run -p 127.0.0.1:8501:8501 -v "$(pwd)/data:/app/data" divitrack
 | Gram altın / gümüş | `XAU-GRAM`, `XAG-GRAM` | `ons (GC=F / SI=F) × USDTRY ÷ 31,1035` ile türetilir (TRY) |
 | Ons altın / gümüş | `XAU-OZ`, `XAG-OZ` | Vadeli kontrat fiyatı (USD), spot'a yakın |
 | Nakit | `NAKIT-TRY` | Adet = tutar, fiyat = 1 |
-| Yatırım fonu | `TTE`, `AFT` | Sınıf: Yatırım Fonu. Fiyat ve geçmiş TEFAS'tan gelir (TL); manuel fiyat girilirse o kullanılır |
-| BES | `BES-FON1` | Manuel birim fiyat girilir, istenince güncellenir |
+| Yatırım / BES fonu | `TTE`, `AFT`, `AH5` | Sınıf: Yatırım Fonu. Fiyat, geçmiş ve fon adı TEFAS'tan gelir (TL); BES fonları da aynı şekilde. Manuel fiyat girilirse o kullanılır |
+| BES devlet katkısı vb. | `BES-DK` | Nakit sınıfı, manuel tutar |
 
 ### CSV formatı
 
@@ -167,8 +168,8 @@ Yeni bir veri sağlayıcısı eklemek için `core/ports.py` içindeki `PriceProv
 - [x] Banka dökümü kolon eşleme sihirbazı ve kategori kuralları
 - [x] Varlık karnesi ve aylık puan geçmişi
 - [x] Excel (.xlsx) dökümleri
-- [ ] BES fonları (TEFAS `EMK` türü) ve fon adının otomatik doldurulması
-- [ ] Hedef tarihli birikim planları (ev, araba, acil durum fonu)
+- [x] BES fonları ve fon adının TEFAS'tan otomatik doldurulması
+- [x] Hedef tarihli birikim planları (ev, araba, acil durum fonu)
 
 ## ⚠️ Sorumluluk Reddi
 

@@ -18,7 +18,7 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from divitrack.bootstrap import build_container  # noqa: E402
 from divitrack.config import Settings  # noqa: E402
-from divitrack.core.entities import Asset, CashFlow, Dividend, Transaction  # noqa: E402
+from divitrack.core.entities import Asset, CashFlow, Dividend, Goal, Transaction  # noqa: E402
 from divitrack.core.enums import AssetClass, Currency, DividendStatus, Purpose, TxType  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,7 @@ def _seed(db: Path) -> None:
     rules.declaration_limit = D("10000")
     c.insights.save_rules(rules)
     c.budget.add_rule("migros", market.id)
+    c.goals.add(Goal("Acil durum fonu", D("100000"), date(2030, 1, 1), D("500"), (cash.id,)))
     for month in (date(2026, 8, 1), date(2026, 9, 1)):
         c.insights.record_score(c.insights.health(c.portfolio.summary(Currency.TRY)), day=month)
     c.dividends.record(

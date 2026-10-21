@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from divitrack.core.calculations import compute_position
-from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Snapshot, Transaction
+from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Goal, Snapshot, Transaction
 from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import DivitrackError, ImportFormatError
 from divitrack.core.inflation import parse_month
@@ -24,13 +24,14 @@ from divitrack.repositories.sqlite import (
     CategoryRuleRepository,
     CpiRepository,
     DividendRepository,
+    GoalRepository,
     SettingsRepository,
     SnapshotRepository,
     TransactionRepository,
 )
 
 FORMAT_NAME = "divitrack-export"
-FORMAT_VERSION = 3  # v2: amaç, kurumsal işlemler, bütçe, TÜFE · v3: döküm kuralları
+FORMAT_VERSION = 4  # v2: amaç, kurumsal işlemler, bütçe, TÜFE · v3: döküm kuralları · v4: hedefler
 
 TX_COLUMNS = ["date", "symbol", "asset_class", "currency", "type", "quantity", "price", "fee", "note"]
 DIV_COLUMNS = [
@@ -88,12 +89,14 @@ class DataTransferService:
         flows: CashFlowRepository,
         cpi: CpiRepository,
         rules: CategoryRuleRepository,
+        goals: GoalRepository,
     ) -> None:
         self.db = db
         self.categories = categories
         self.flows = flows
         self.cpi = cpi
         self.rules = rules
+        self.goals = goals
         self.assets = assets
         self.transactions = transactions
         self.dividends = dividends
@@ -166,6 +169,16 @@ class DataTransferService:
             ],
             "cpi": {m: _s(v) for m, v in sorted(self.cpi.all().items())},
             "category_rules": [{"pattern": pattern, "category_id": cid} for _, pattern, cid in self.rules.list()],
+            "goals": [
+                {
+                    "name": g.name,
+                    "target_amount": _s(g.target_amount),
+                    "target_date": g.target_date.isoformat(),
+                    "extra_saved": _s(g.extra_saved),
+                    "asset_ids": list(g.asset_ids),
+                }
+                for g in self.goals.list()
+            ],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -242,7 +255,19 @@ class DataTransferService:
         ]
         cpi = {parse_month(m): to_decimal(v) for m, v in (data.get("cpi") or {}).items()}
         rules = [(str(r["pattern"]), int(r["category_id"])) for r in data.get("category_rules", [])]
-        return assets, txs, divs, snaps, settings, categories, flows, cpi, rules
+        goals = [
+            (
+                Goal(
+                    g["name"],
+                    to_decimal(g["target_amount"]),
+                    date.fromisoformat(g["target_date"]),
+                    to_decimal(g.get("extra_saved") or "0"),
+                ),
+                [int(a) for a in g.get("asset_ids", [])],
+            )
+            for g in data.get("goals", [])
+        ]
+        return assets, txs, divs, snaps, settings, categories, flows, cpi, rules, goals
 
     def _apply(
         self,
@@ -255,6 +280,7 @@ class DataTransferService:
         flows: list[tuple[int, date, Decimal, str]],
         cpi: dict[str, Decimal],
         rules: list[tuple[str, int]],
+        goals: list[tuple[Goal, list[int]]],
     ) -> ImportReport:
         report = ImportReport()
         id_map: dict[int, int] = {}
@@ -333,6 +359,12 @@ class DataTransferService:
                 self.rules.upsert(pattern, cat_map[old_cat])
         if cpi:
             self.cpi.replace_all({**self.cpi.all(), **cpi})
+        existing_goals = {g.name.casefold() for g in self.goals.list()}
+        for goal, old_assets in goals:
+            if goal.name.casefold() in existing_goals:
+                continue
+            goal.asset_ids = tuple(id_map[a] for a in old_assets if a in id_map)
+            self.goals.add(goal)
         return report
 
     def _validate_ledger(self, new_txs: list[Transaction]) -> None:
@@ -353,6 +385,7 @@ class DataTransferService:
                 "cash_flows",
                 "cpi_monthly",
                 "score_history",
+                "goals",
             ):
                 c.execute(f"DELETE FROM {table}")
 

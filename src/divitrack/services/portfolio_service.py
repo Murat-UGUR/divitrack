@@ -103,6 +103,12 @@ class PortfolioService:
     # ------------------------------------------------------------------ varlıklar
     def add_asset(self, asset: Asset) -> Asset:
         self._normalize(asset)
+        if (
+            asset.asset_class is AssetClass.FUND
+            and not asset.name
+            and self.assets.find(asset.symbol, asset.asset_class) is None
+        ):
+            asset.name = (self.market.describe(asset) or "")[:120]
         return self.assets.add(asset)
 
     def update_asset(self, asset: Asset) -> Asset:

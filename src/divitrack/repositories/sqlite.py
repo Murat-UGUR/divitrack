@@ -8,7 +8,16 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
-from divitrack.core.entities import Asset, CashFlow, Category, Dividend, ProviderQuote, Snapshot, Transaction
+from divitrack.core.entities import (
+    Asset,
+    CashFlow,
+    Category,
+    Dividend,
+    Goal,
+    ProviderQuote,
+    Snapshot,
+    Transaction,
+)
 from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import DuplicateError, NotFoundError, ValidationError
 from divitrack.db.database import Database
@@ -473,3 +482,65 @@ class ScoreHistoryRepository(_Repo):
         with self.db.transaction() as c:
             rows = c.execute("SELECT month, score, components FROM score_history ORDER BY month").fetchall()
         return [(r["month"], Decimal(r["score"]), json.loads(r["components"])) for r in rows]
+
+
+class GoalRepository(_Repo):
+    def _assets(self, c: sqlite3.Connection, goal_id: int) -> tuple[int, ...]:
+        rows = c.execute("SELECT asset_id FROM goal_assets WHERE goal_id=? ORDER BY asset_id", (goal_id,))
+        return tuple(r["asset_id"] for r in rows)
+
+    def _write_assets(self, c: sqlite3.Connection, goal: Goal) -> None:
+        c.execute("DELETE FROM goal_assets WHERE goal_id=?", (goal.id,))
+        for aid in goal.asset_ids:
+            # Varlık başka bir hedefe bağlıysa bu hedefe taşınır
+            c.execute(
+                "INSERT INTO goal_assets(asset_id, goal_id) VALUES (?, ?) "
+                "ON CONFLICT(asset_id) DO UPDATE SET goal_id=excluded.goal_id",
+                (aid, goal.id),
+            )
+
+    def add(self, goal: Goal) -> Goal:
+        try:
+            with self.db.transaction() as c:
+                cur = c.execute(
+                    "INSERT INTO goals(name, target_amount, target_date, extra_saved) VALUES (?, ?, ?, ?)",
+                    (goal.name, _s(goal.target_amount), goal.target_date.isoformat(), _s(goal.extra_saved)),
+                )
+                goal.id = cur.lastrowid
+                self._write_assets(c, goal)
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateError(f"'{goal.name}' adlı hedef zaten var") from exc
+        return goal
+
+    def update(self, goal: Goal) -> Goal:
+        try:
+            with self.db.transaction() as c:
+                cur = c.execute(
+                    "UPDATE goals SET name=?, target_amount=?, target_date=?, extra_saved=? WHERE id=?",
+                    (goal.name, _s(goal.target_amount), goal.target_date.isoformat(), _s(goal.extra_saved), goal.id),
+                )
+                if cur.rowcount == 0:
+                    raise NotFoundError(f"Hedef bulunamadı: {goal.id}")
+                self._write_assets(c, goal)
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateError(f"'{goal.name}' adlı hedef zaten var") from exc
+        return goal
+
+    def delete(self, goal_id: int) -> None:
+        with self.db.transaction() as c:
+            c.execute("DELETE FROM goals WHERE id=?", (goal_id,))
+
+    def list(self) -> list[Goal]:
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT * FROM goals ORDER BY target_date, name").fetchall()
+            return [
+                Goal(
+                    id=r["id"],
+                    name=r["name"],
+                    target_amount=Decimal(r["target_amount"]),
+                    target_date=date.fromisoformat(r["target_date"]),
+                    extra_saved=Decimal(r["extra_saved"]),
+                    asset_ids=self._assets(c, r["id"]),
+                )
+                for r in rows
+            ]

@@ -1,5 +1,14 @@
 # Değişiklik Günlüğü
 
+## [0.5.0] - 2026-10-21
+
+### Eklendi
+- Birikim hedefleri: hedef tutar ve tarih, bağlı varlıklar, ilerleme, aylık gereken tutar, mevcut tasarruf hızıyla "yolunda / geride" durumu ve uyarıları
+- Fon eklerken adın TEFAS'tan otomatik doldurulması; BES fonları da TEFAS'tan fiyatlanır
+
+### Değişti
+- Veritabanı şeması v4, JSON dışa aktarım biçimi v4 (hedefler dahil)
+
 ## [0.4.0] - 2026-10-21
 
 ### Eklendi

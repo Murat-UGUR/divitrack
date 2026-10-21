@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from divitrack.core.entities import Asset, Transaction
 from divitrack.core.enums import AssetClass, Currency, DividendStatus, Purpose, TxType
@@ -246,6 +247,7 @@ class InsightsService:
         self.market = market
         self.settings = settings
         self.scores = scores
+        self.goals: Any = None  # GoalService; bootstrap bağlar (döngüsel bağımlılığı önlemek için sonradan)
         self.today = today
 
     # ------------------------------------------------------------------ kurallar
@@ -705,5 +707,19 @@ class InsightsService:
             out.append(
                 Alert("info", f"{assets.get(d.asset_id, '?')} temettüsü {d.pay_date:%d.%m.%Y} tarihinde bekleniyor.")
             )
+        if self.goals is not None:
+            for gp in self.goals.progress():
+                if gp.status == "Geride":
+                    out.append(
+                        Alert(
+                            "warning",
+                            f"'{gp.goal.name}' hedefi geride: ayda {gp.required_monthly or ZERO:.0f} TL gerekiyor, "
+                            f"son aylarda ortalama {gp.pace or ZERO:.0f} TL ayrılabildi.",
+                        )
+                    )
+                elif gp.status == "Süre doldu":
+                    out.append(
+                        Alert("warning", f"'{gp.goal.name}' hedefinin tarihi geçti; kalan {gp.remaining:.0f} TL.")
+                    )
         order = {"error": 0, "warning": 1, "info": 2}
         return sorted(out, key=lambda a: order[a.level])

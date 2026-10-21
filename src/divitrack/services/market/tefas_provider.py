@@ -86,6 +86,17 @@ class TefasProvider:
     def fetch_dividends(self, symbol: str) -> list[tuple[date, Decimal]]:
         return []  # fonlar temettü dağıtmaz; getiri fiyata yansır
 
+    def describe(self, symbol: str) -> str | None:
+        """Fonun resmî unvanı (ör. "İŞ PORTFÖY BIST TEKNOLOJİ … FONU"); bulunamazsa None."""
+        if not symbol.startswith(PREFIX):
+            return None
+        body = post_json(self.transport, URL, {"fonKodu": symbol.removeprefix(PREFIX), "dil": "TR", "periyod": 1})
+        rows = body.get("resultList") if isinstance(body, dict) else None
+        for row in rows or []:
+            if isinstance(row, dict) and row.get("fonUnvan"):
+                return " ".join(str(row["fonUnvan"]).split())
+        return None
+
     def fetch_history(self, symbols: Sequence[str], start: date) -> dict[str, list[tuple[date, Decimal]]]:
         period = months_back(start, self.today())
         out: dict[str, list[tuple[date, Decimal]]] = {}
@@ -130,6 +141,11 @@ class CompositeProvider:
     def fetch_dividends(self, symbol: str) -> list[tuple[date, Decimal]]:
         groups = self._split([symbol])
         return groups[0][0].fetch_dividends(symbol) if groups else []
+
+    def describe(self, symbol: str) -> str | None:
+        groups = self._split([symbol])
+        describe = getattr(groups[0][0], "describe", None) if groups else None
+        return describe(symbol) if callable(describe) else None
 
     def fetch_history(self, symbols: Sequence[str], start: date) -> dict[str, list[tuple[date, Decimal]]]:
         out: dict[str, list[tuple[date, Decimal]]] = {}

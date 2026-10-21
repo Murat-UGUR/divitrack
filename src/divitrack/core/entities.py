@@ -192,6 +192,28 @@ class Category:
 
 
 @dataclass(slots=True)
+class Goal:
+    """Birikim hedefi (ev peşinatı, acil durum fonu…). İlerleme = bağlı varlıkların TL değeri + `extra_saved`."""
+
+    name: str
+    target_amount: Decimal
+    target_date: date
+    extra_saved: Decimal = ZERO
+    asset_ids: tuple[int, ...] = ()
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        self.name = " ".join(self.name.split())
+        if not self.name:
+            raise ValidationError("Hedef adı boş olamaz")
+        if self.target_amount <= 0:
+            raise ValidationError("Hedef tutarı sıfırdan büyük olmalı")
+        if self.extra_saved < 0:
+            raise ValidationError("Ek birikim negatif olamaz")
+        self.asset_ids = tuple(sorted(set(self.asset_ids)))
+
+
+@dataclass(slots=True)
 class CashFlow:
     """Bir gelir veya gider kaydı. Tutar her zaman pozitiftir; yönü kategoriden gelir."""
 

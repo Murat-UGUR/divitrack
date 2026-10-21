@@ -143,6 +143,19 @@ class MarketDataService:
                 rates[c] = ONE / inverse.price
         return rates
 
+    def describe(self, asset: Asset) -> str | None:
+        """Sağlayıcı destekliyorsa varlığın adını döndürür (ör. TEFAS fon unvanı). Hata olursa None."""
+        sym = provider_symbol(asset)
+        describe = getattr(self.provider, "describe", None)
+        if sym is None or not callable(describe):
+            return None
+        try:
+            name = describe(sym)
+        except Exception as exc:
+            log.info("Ad bulunamadı (%s): %s", sym, exc)
+            return None
+        return str(name) if name else None
+
     def clear_cache(self) -> None:
         self.cache.clear()
         self._history_cache.clear()

@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import streamlit as st
 
+from divitrack.core.entities import Goal
 from divitrack.core.enums import Currency, Purpose
 from divitrack.core.exceptions import DivitrackError
 from divitrack.core.money import HUNDRED, ZERO, to_decimal
@@ -14,7 +15,7 @@ from divitrack.services.budget_service import add_months, month_start
 from divitrack.ui.components.widgets import sidebar
 from divitrack.ui.formatting import fmt_money
 from divitrack.ui.pages.budget import month_label
-from divitrack.ui.state import get_container, show_flashes
+from divitrack.ui.state import get_container, run_action, show_flashes
 from divitrack.ui.tables import plan_frame
 
 NUM = st.column_config.NumberColumn
@@ -97,7 +98,107 @@ def render() -> None:
     else:
         st.info("Öneriyi görmek için yatırılacak tutarı gir.")
 
+    _goals()
+
     st.subheader("Aylık rutin")
     st.caption("Her ay aynı sırayla: önce veriyi güncelle, sonra karar ver. İşaretler yalnızca bu oturumda tutulur.")
     for i, (title, detail) in enumerate(ROUTINE, start=1):
         st.checkbox(f"**{i}. {title}** — {detail}", key=f"routine_{i}")
+
+
+STATUS_ICON = {"Ulaşıldı": "✅", "Yolunda": "🟢", "Geride": "🟠", "Süre doldu": "🔴", "Tasarruf verisi yok": "⚪"}
+
+
+def _goals() -> None:
+    c = get_container()
+    st.subheader("Birikim hedefleri")
+    st.caption(
+        "Ev peşinatı, acil durum fonu, araba… Hedefe bağladığınız varlıkların güncel TL değeri ve elle "
+        "girdiğiniz ek birikim ilerleme sayılır. Hız, son 3 tamamlanmış ayın yatırılabilir tasarruf ortalamasıdır "
+        "(Bütçe); birden fazla hedef aynı hızı paylaşır."
+    )
+    progress = c.goals.progress()
+    pace = c.goals.monthly_pace()
+    if progress:
+        total_required = sum((gp.required_monthly or ZERO for gp in progress if gp.months_left > 0), ZERO)
+        col1, col2 = st.columns(2)
+        col1.metric("Tüm hedefler için aylık gereken", fmt_money(total_required, Currency.TRY))
+        col2.metric(
+            "Son aylardaki ortalama hız",
+            fmt_money(pace, Currency.TRY),
+            delta=None if pace is None else ("Yetiyor" if pace >= total_required else "Yetmiyor"),
+            delta_color="normal" if pace is None or pace >= total_required else "inverse",
+        )
+        for gp in progress:
+            with st.container(border=True):
+                top, right = st.columns([3, 1])
+                top.markdown(f"**{gp.goal.name}** · {gp.goal.target_date:%m.%Y} · {STATUS_ICON[gp.status]} {gp.status}")
+                top.progress(float(gp.pct) / 100)
+                right.markdown(
+                    f"{fmt_money(gp.saved, Currency.TRY, 0)} / {fmt_money(gp.goal.target_amount, Currency.TRY, 0)}"
+                )
+                details = [f"{gp.months_left} ay kaldı"]
+                if gp.required_monthly is not None:
+                    details.append(f"ayda {fmt_money(gp.required_monthly, Currency.TRY, 0)} gerekiyor")
+                if gp.months_needed:
+                    details.append(f"bu hızla {gp.months_needed} ayda ulaşılır")
+                if gp.symbols:
+                    details.append("varlıklar: " + ", ".join(gp.symbols))
+                top.caption(" · ".join(details))
+    else:
+        st.info("Henüz hedef yok.")
+
+    assets = [a for a, s in c.portfolio.positions() if s.is_open]
+    goals = c.goals.list()
+    col1, col2 = st.columns(2)
+    with col1, st.expander("Yeni hedef", expanded=not progress), st.form("goal_add", clear_on_submit=True):
+        name = st.text_input("Ad", placeholder="Ev peşinatı")
+        amount = st.text_input("Hedef tutar (TL)", placeholder="500.000")
+        target = st.date_input("Hedef tarih", value=add_months(date.today(), 24), format="DD.MM.YYYY")
+        linked = st.multiselect("Bağlı varlıklar", assets, format_func=lambda a: a.display_name)
+        extra = st.text_input("Varlıklar dışında biriken (TL)", value="0", help="Ör. vadeli hesap, elde nakit")
+        if st.form_submit_button("Hedef ekle", type="primary"):
+            run_action(
+                lambda: c.goals.add(
+                    Goal(
+                        name,
+                        to_decimal(amount, field="Hedef tutar"),
+                        target,
+                        to_decimal(extra or "0", field="Ek birikim"),
+                        tuple(a.id for a in linked if a.id is not None),
+                    )
+                ),
+                "Hedef eklendi",
+            )
+    if goals:
+        with col2, st.expander("Hedefi düzenle / sil"):
+            goal = st.selectbox("Hedef", goals, format_func=lambda g: g.name, key="goal_pick")
+            if goal is not None:
+                with st.form(f"goal_edit_{goal.id}"):
+                    amount = st.text_input("Hedef tutar (TL)", value=format(goal.target_amount.normalize(), "f"))
+                    target = st.date_input("Hedef tarih", value=goal.target_date, format="DD.MM.YYYY")
+                    linked = st.multiselect(
+                        "Bağlı varlıklar",
+                        assets,
+                        default=[a for a in assets if a.id in goal.asset_ids],
+                        format_func=lambda a: a.display_name,
+                    )
+                    extra = st.text_input("Ek birikim (TL)", value=format(goal.extra_saved.normalize(), "f"))
+                    save = st.form_submit_button("Kaydet")
+                    delete = st.form_submit_button("Hedefi sil")
+                if save:
+                    run_action(
+                        lambda: c.goals.update(
+                            Goal(
+                                goal.name,
+                                to_decimal(amount, field="Hedef tutar"),
+                                target,
+                                to_decimal(extra or "0", field="Ek birikim"),
+                                tuple(a.id for a in linked if a.id is not None),
+                                goal.id,
+                            )
+                        ),
+                        "Hedef güncellendi",
+                    )
+                if delete:
+                    run_action(lambda: c.goals.delete(goal.id or -1), "Hedef silindi")

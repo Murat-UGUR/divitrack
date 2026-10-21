@@ -44,6 +44,8 @@
 
 **Puan geçmişi ve varlık karnesi.** Portföy Özeti her açıldığında o ayın puanı `score_history` tablosuna yazılır (aynı ay üzerine yazar). Varlık karnesi her açık kalem için ağırlık, nominal/reel getiri ve temettü verimini gösterir; tek kalem sınırı, atanmamış amaç, enflasyonun gerisinde kalma ve "temettü amacında ama temettü yok" durumlarını işaretler.
 
+**Birikim hedefleri.** `goals` + `goal_assets` (bir varlık yalnızca bir hedefe bağlanır, değeri iki kez sayılmasın). İlerleme = bağlı varlıkların güncel TL değeri + elle girilen ek birikim. Hız = son 3 tamamlanmış ayın pozitif net tasarrufu × yatırım payı; tüm hedefler aynı hızı paylaştığından ekranda toplam aylık gereken tutar da gösterilir. Geride kalan veya süresi dolan hedefler uyarı üretir.
+
 **Yurt dışı temettü beyan sınırı.** TL dışı, "Ödendi" işaretli temettülerin yıllık brüt toplamı ödeme günü kuruyla TL'ye çevrilir ve kullanıcının girdiği sınırla karşılaştırılır. Sınır her yıl değiştiği için varsayılan değer yoktur.
 
 **Değer geçmişi.** Dashboard her açıldığında o günün toplamı `portfolio_snapshots` tablosuna yazılır (upsert). `SnapshotService.backfill` işlem defteri + Yahoo geçmiş kapanışları + geçmiş kurlarla ilk işlemden bugüne günlük seriyi yeniden oluşturur.
@@ -56,6 +58,7 @@ assets (purpose) ──< transactions (BUY/SELL/BONUS/RIGHTS/REINVEST)
 categories ──< cash_flows        — gelir/gider ve aylık bütçe
    └────────< category_rules    — döküm açıklaması → kategori
 score_history (month PK)         — aylık sağlık puanı
+goals ──< goal_assets >── assets — birikim hedefleri
 cpi_monthly (month PK)           — TÜFE endeksi
 price_cache (symbol PK)          — hisseler, GC=F/SI=F, USDTRY=X…
 portfolio_snapshots (date, ccy)  — büyüme grafiği

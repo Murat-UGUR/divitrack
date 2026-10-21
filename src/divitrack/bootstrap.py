@@ -16,6 +16,7 @@ from divitrack.repositories.sqlite import (
     CategoryRuleRepository,
     CpiRepository,
     DividendRepository,
+    GoalRepository,
     PriceCacheRepository,
     ScoreHistoryRepository,
     SettingsRepository,
@@ -25,6 +26,7 @@ from divitrack.repositories.sqlite import (
 from divitrack.services.budget_service import BudgetService
 from divitrack.services.cpi_service import CpiService
 from divitrack.services.dividend_engine import DividendEngine
+from divitrack.services.goal_service import GoalService
 from divitrack.services.insights_service import InsightsService
 from divitrack.services.io.transfer import DataTransferService
 from divitrack.services.market.market_data_service import MarketDataService
@@ -50,6 +52,7 @@ class Container:
     insights: InsightsService
     cpi: CpiRepository
     inflation: CpiService
+    goals: GoalService
 
     @property
     def base_currency(self) -> Currency:
@@ -101,7 +104,7 @@ def build_container(
     market = MarketDataService(provider, PriceCacheRepository(db), settings.price_cache_ttl_min)
     portfolio = PortfolioService(assets, txs, market)
     budget = BudgetService(categories, flows, settings_repo, CategoryRuleRepository(db))
-    return Container(
+    container = Container(
         settings=settings,
         db=db,
         settings_repo=settings_repo,
@@ -110,10 +113,23 @@ def build_container(
         dividends=DividendEngine(divs, settings_repo, provider),
         snapshots=SnapshotService(snaps, portfolio),
         transfer=DataTransferService(
-            db, assets, txs, divs, snaps, settings_repo, categories, flows, cpi, CategoryRuleRepository(db)
+            db,
+            assets,
+            txs,
+            divs,
+            snaps,
+            settings_repo,
+            categories,
+            flows,
+            cpi,
+            CategoryRuleRepository(db),
+            GoalRepository(db),
         ),
         budget=budget,
         insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db)),
         cpi=cpi,
         inflation=CpiService(cpi, settings_repo),
+        goals=GoalService(GoalRepository(db), portfolio, budget),
     )
+    container.insights.goals = container.goals
+    return container

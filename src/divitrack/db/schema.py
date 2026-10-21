@@ -184,6 +184,23 @@ MIGRATIONS: list[str] = [
         components TEXT NOT NULL DEFAULT '{}'
     );
     """,
+    # --- v4: birikim hedefleri ---------------------------------------------------
+    """
+    CREATE TABLE goals (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        target_amount TEXT NOT NULL,
+        target_date   TEXT NOT NULL,
+        extra_saved   TEXT NOT NULL DEFAULT '0',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Bir varlık en fazla bir hedefe bağlanır (değeri iki kez sayılmasın)
+    CREATE TABLE goal_assets (
+        asset_id INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+        goal_id  INTEGER NOT NULL REFERENCES goals(id) ON DELETE CASCADE
+    );
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -200,4 +217,6 @@ DATA_TABLES = (
     "cpi_monthly",
     "category_rules",
     "score_history",
+    "goals",
+    "goal_assets",
 )
