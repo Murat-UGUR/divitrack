@@ -48,6 +48,8 @@ class MarketDataService:
         self.ttl = timedelta(minutes=ttl_minutes)
         self.clock = clock
         self.last_error: str | None = None
+        self._history_cache: dict[tuple[tuple[str, ...], date], tuple[datetime, dict[str, Series]]] = {}
+        self.history_ttl = timedelta(hours=6)
 
     @property
     def online(self) -> bool:
@@ -143,6 +145,7 @@ class MarketDataService:
 
     def clear_cache(self) -> None:
         self.cache.clear()
+        self._history_cache.clear()
 
     # ------------------------------------------------------------------ geçmiş
     def price_history(self, assets: Sequence[Asset], start: date) -> dict[int, Series]:
@@ -179,10 +182,16 @@ class MarketDataService:
     def _history(self, symbols: Sequence[str], start: date) -> dict[str, Series]:
         if not symbols or self.provider is None:
             return {}
+        key = (tuple(sorted(symbols)), start)
+        hit = self._history_cache.get(key)
+        if hit is not None and self.clock() - hit[0] < self.history_ttl:
+            return hit[1]
         try:
             raw = self.provider.fetch_history(symbols, start)
         except Exception as exc:
             log.warning("Geçmiş fiyat çekilemedi: %s", exc)
             self.last_error = str(exc)
             return {}
-        return {s: dict(points) for s, points in raw.items()}
+        result = {s: dict(points) for s, points in raw.items()}
+        self._history_cache[key] = (self.clock(), result)
+        return result

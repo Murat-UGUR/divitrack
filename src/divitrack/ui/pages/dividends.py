@@ -7,12 +7,12 @@ from datetime import date, timedelta
 import streamlit as st
 
 from divitrack.core.entities import Dividend
-from divitrack.core.enums import AssetClass, DividendStatus
+from divitrack.core.enums import AssetClass, Currency, DividendStatus
 from divitrack.core.money import to_decimal
 from divitrack.services.dividend_engine import EventKind
 from divitrack.ui.components import charts
 from divitrack.ui.components.widgets import sidebar
-from divitrack.ui.formatting import fmt_money
+from divitrack.ui.formatting import fmt_money, fmt_pct
 from divitrack.ui.state import get_container, run_action, show_flashes
 from divitrack.ui.tables import dividends_frame, events_frame, monthly_income, yields_frame
 
@@ -87,6 +87,8 @@ def render() -> None:
         st.caption("TTM: son 12 ayda dağıtılan hisse başı brüt temettü. Yıllık tutarlar varlığın para birimindedir.")
     else:
         st.caption("Açık hisse pozisyonu yok.")
+
+    _declaration(today.year)
 
     # --- Kayıtlar ----------------------------------------------------------------
     tab_add, tab_list, tab_import = st.tabs(["Temettü Kaydı Ekle", "Kayıtlar", "Geçmişten Aktar"])
@@ -189,3 +191,26 @@ def _import_history(held: list) -> None:  # type: ignore[type-arg]
                 c.dividends.record(d)
 
         run_action(add_all, f"{len(suggestions)} temettü kaydı eklendi")
+
+
+def _declaration(year: int) -> None:
+    """Yurt dışı temettülerin yıllık beyan sınırına göre durumu."""
+    c = get_container()
+    st.subheader(f"Yurt dışı temettü ve beyan sınırı ({year})")
+    status = c.insights.declaration_status(year)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Bu yıl ödenen (brüt, TL)", fmt_money(status.gross_try, Currency.TRY))
+    col2.metric("Beyan sınırı", fmt_money(status.limit, Currency.TRY) if status.limit else "Girilmedi")
+    col3.metric("Doluluk", fmt_pct(status.ratio * 100 if status.ratio is not None else None, 0))
+    if status.ratio is not None:
+        st.progress(min(float(status.ratio), 1.0))
+    if status.exceeded:
+        st.error("Sınır aşıldı: bu yılın yurt dışı temettüleri için gelir vergisi beyannamesi gerekebilir.")
+    if not status.limit:
+        st.caption("Sınırı **Ayarlar & Veri > Hedefler ve kurallar** bölümünden girin; her yıl güncellenir.")
+    st.caption(
+        "Yalnızca **Ödendi** işaretli, TL dışındaki temettüler sayılır. Brüt tutar ödeme günü kuruyla "
+        "TL'ye çevrilir"
+        + (" (bazı kayıtlarda kur geçmişi yok, güncel kur kullanıldı)" if status.approx_fx else "")
+        + ". Resmi hesap TCMB kuruyla yapılır; bu bir ön izlemedir, vergi tavsiyesi değildir."
+    )

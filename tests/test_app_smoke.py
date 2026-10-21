@@ -18,12 +18,12 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from divitrack.bootstrap import build_container  # noqa: E402
 from divitrack.config import Settings  # noqa: E402
-from divitrack.core.entities import Asset, Dividend, Transaction  # noqa: E402
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, TxType  # noqa: E402
+from divitrack.core.entities import Asset, CashFlow, Dividend, Transaction  # noqa: E402
+from divitrack.core.enums import AssetClass, Currency, DividendStatus, Purpose, TxType  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "app.py")
-PAGES = ["dashboard", "holdings", "dividends", "settings"]
+PAGES = ["dashboard", "holdings", "dividends", "analysis", "budget", "plan", "settings"]
 
 
 @pytest.fixture(autouse=True)
@@ -40,13 +40,27 @@ def _isolated_db(tmp_path, monkeypatch) -> Path:
 
 def _seed(db: Path) -> None:
     c = build_container(Settings(db_path=db, offline=True), use_default_provider=False)
-    cash = c.portfolio.add_asset(Asset("NAKIT-TRY", AssetClass.CASH, Currency.TRY))
-    fund = c.portfolio.add_asset(Asset("BES-FON", AssetClass.CASH, Currency.TRY, manual_price=D("1.5")))
+    cash = c.portfolio.add_asset(Asset("NAKIT-TRY", AssetClass.CASH, Currency.TRY, purpose=Purpose.DEFENSIVE))
+    fund = c.portfolio.add_asset(
+        Asset("BES-FON", AssetClass.FUND, Currency.TRY, manual_price=D("1.5"), purpose=Purpose.GROWTH)
+    )
     stock = c.portfolio.add_asset(Asset("THYAO", AssetClass.BIST_STOCK, Currency.TRY))
     for a, q, p in ((cash, "1000", "1"), (fund, "200", "1.2"), (stock, "10", "250")):
         c.portfolio.add_transaction(
             Transaction(asset_id=a.id, tx_type=TxType.BUY, quantity=D(q), price=D(p), trade_date=date(2024, 1, 2))
         )
+    c.portfolio.add_transaction(
+        Transaction(asset_id=fund.id, tx_type=TxType.BONUS, quantity=D("20"), price=D("0"), trade_date=date(2024, 6, 1))
+    )
+    salary = c.budget.categories.find("Maaş")
+    market = c.budget.categories.find("Market")
+    c.budget.set_budget(market.id, D("100"))
+    c.budget.add_flow(CashFlow(salary.id, date.today(), D("50000")))
+    c.budget.add_flow(CashFlow(market.id, date.today(), D("250"), "haftalık"))
+    c.cpi.replace_all({"2024-01": D("100"), "2025-01": D("145")})
+    rules = c.insights.rules()
+    rules.declaration_limit = D("10000")
+    c.insights.save_rules(rules)
     c.dividends.record(
         Dividend(
             asset_id=stock.id,
@@ -79,3 +93,20 @@ def test_page_renders(page: str, seeded: bool, _isolated_db: Path) -> None:
         _seed(_isolated_db)
     at = AppTest.from_string(_page_script(page), default_timeout=60).run()
     assert not at.exception, at.exception
+
+
+def test_plan_page_suggests_split(_isolated_db: Path) -> None:
+    _seed(_isolated_db)
+    at = AppTest.from_string(_page_script("plan"), default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert len(at.dataframe) == 1  # bütçeden gelen tutarla plan tablosu
+
+
+def test_budget_form_adds_flow(_isolated_db: Path) -> None:
+    _seed(_isolated_db)
+    at = AppTest.from_string(_page_script("budget"), default_timeout=60).run()
+    next(t for t in at.text_input if t.label == "Tutar (TL)").set_value("1.250,50")
+    next(b for b in at.button if b.label == "Kaydet").click().run()
+    assert not at.exception, at.exception
+    c = build_container(Settings(db_path=_isolated_db, offline=True), use_default_provider=False)
+    assert any(f.amount == D("1250.50") for f in c.budget.flows.list())

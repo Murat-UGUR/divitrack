@@ -7,7 +7,7 @@ from datetime import date
 import streamlit as st
 
 from divitrack.core.entities import Asset, Transaction
-from divitrack.core.enums import AssetClass, Currency, TxType
+from divitrack.core.enums import AssetClass, Currency, Purpose, TxType
 from divitrack.core.money import to_decimal
 from divitrack.services.market.symbols import METAL_PRESETS
 from divitrack.ui.components.widgets import sidebar
@@ -19,12 +19,24 @@ DEFAULT_CCY = {
     AssetClass.BIST_STOCK: Currency.TRY,
     AssetClass.US_STOCK: Currency.USD,
     AssetClass.PRECIOUS_METAL: Currency.TRY,
+    AssetClass.FUND: Currency.TRY,
     AssetClass.CASH: Currency.TRY,
 }
+DEFAULT_PURPOSE = {
+    AssetClass.PRECIOUS_METAL: Purpose.DEFENSIVE,
+    AssetClass.CASH: Purpose.DEFENSIVE,
+}
+PURPOSES = list(Purpose)
+TX_HELP = (
+    "**Bedelsiz / bölünme:** yeni gelen adedi girin, fiyat 0 sayılır (ortalama maliyet düşer). "
+    "**Bedelli (rüçhan):** kullanılan adet ve ödenen birim fiyat. "
+    "**Temettüden alış:** temettüyle alınan adet; yeni para sayılmaz. Fiyatı 0 girerseniz maliyetsiz eklenir."
+)
 SYMBOL_HELP = {
     AssetClass.BIST_STOCK: "Örn. THYAO, TUPRS (.IS soneki otomatik eklenir)",
     AssetClass.US_STOCK: "Örn. AAPL, SCHD, VOO",
     AssetClass.PRECIOUS_METAL: "Hazır sembollerden birini seçin veya Yahoo sembolü girin (ör. GC=F)",
+    AssetClass.FUND: "TEFAS kodu (ör. TTE). Fiyat Yahoo'da yoksa manuel birim fiyat girin",
     AssetClass.CASH: "Serbest ad: NAKIT-TRY, BES-FON1… (fiyat çekilmez)",
 }
 
@@ -55,6 +67,14 @@ def _asset_form() -> None:
             disabled=asset_class is AssetClass.BIST_STOCK,
         )
         name = col1.text_input("Ad (opsiyonel)")
+        purpose = col1.selectbox(
+            "Amaç",
+            PURPOSES,
+            index=PURPOSES.index(DEFAULT_PURPOSE.get(asset_class, Purpose.UNASSIGNED)),
+            format_func=lambda p: p.label,
+            help="Dağılım hedefleri ve aylık plan amaca göre hesaplanır. "
+            + " · ".join(f"{p.label}: {p.hint}" for p in Purpose.targeted()),
+        )
         manual = col2.text_input(
             "Manuel birim fiyat (opsiyonel)",
             help="Fiyatı API'den gelmeyen varlıklar (BES fonu vb.) için. Nakit için boş bırakın: "
@@ -70,6 +90,7 @@ def _asset_form() -> None:
                         currency=Currency.TRY if asset_class is AssetClass.BIST_STOCK else currency,
                         name=name,
                         manual_price=to_decimal(manual, field="Manuel fiyat") if manual.strip() else None,
+                        purpose=purpose,
                     )
                 )
 
@@ -78,14 +99,15 @@ def _asset_form() -> None:
 
 def _transaction_form(assets: list[Asset]) -> None:
     c = get_container()
-    st.markdown("#### Alım / satım kaydı")
+    st.markdown("#### İşlem kaydı")
+    st.caption(TX_HELP)
     if not assets:
         st.info("Önce bir varlık ekleyin.")
         return
     with st.form("tx_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         asset = col1.selectbox("Varlık", assets, format_func=lambda a: f"{a.display_name} ({a.currency.value})")
-        tx_type = col2.radio("İşlem", list(TxType), format_func=lambda t: t.label, horizontal=True)
+        tx_type = col2.selectbox("İşlem", list(TxType), format_func=lambda t: t.label)
         trade_date = col3.date_input("Tarih", value=date.today(), max_value=date.today(), format="DD.MM.YYYY")
         quantity = col1.text_input("Adet / Tutar", placeholder="10 veya 1.250,50")
         price = col2.text_input("Birim fiyat", placeholder="Nakit için 1", help="Varlığın kendi para biriminde")
@@ -101,7 +123,7 @@ def _transaction_form(assets: list[Asset]) -> None:
                         tx_type=tx_type,
                         trade_date=trade_date,
                         quantity=to_decimal(quantity, field="Adet"),
-                        price=to_decimal(price or ("1" if asset.asset_class is AssetClass.CASH else ""), field="Fiyat"),
+                        price=to_decimal(price or _default_price(asset, tx_type), field="Fiyat"),
                         fee=to_decimal(fee or "0", field="Komisyon"),
                         note=note,
                     )
@@ -110,13 +132,20 @@ def _transaction_form(assets: list[Asset]) -> None:
             run_action(add, "İşlem kaydedildi")
 
 
+def _default_price(asset: Asset, tx_type: TxType) -> str:
+    if tx_type is TxType.BONUS:
+        return "0"
+    return "1" if asset.asset_class is AssetClass.CASH else ""
+
+
 def _asset_manager(assets: list[Asset]) -> None:
     c = get_container()
     positions = {a.id: s for a, s in c.portfolio.positions()}
     for a in assets:
         state = positions.get(a.id)
         qty = fmt_qty(state.quantity) if state else "0"
-        with st.expander(f"{a.display_name} · {a.asset_class.label} · {a.currency.value} · adet {qty}"):
+        label = f"{a.display_name} · {a.asset_class.label} · {a.purpose.label} · {a.currency.value} · adet {qty}"
+        with st.expander(label):
             _asset_editor(a)
 
 
@@ -124,6 +153,9 @@ def _asset_editor(asset: Asset) -> None:
     c = get_container()
     with st.form(f"edit_{asset.id}"):
         name = st.text_input("Ad", value=asset.name)
+        purpose = st.selectbox(
+            "Amaç", PURPOSES, index=PURPOSES.index(asset.purpose), format_func=lambda p: p.label, key=f"pp_{asset.id}"
+        )
         manual = st.text_input(
             "Manuel fiyat (boş = API)", value="" if asset.manual_price is None else str(asset.manual_price)
         )
@@ -135,6 +167,7 @@ def _asset_editor(asset: Asset) -> None:
 
         def upd() -> Asset:
             asset.name = name
+            asset.purpose = purpose
             asset.manual_price = to_decimal(manual, field="Manuel fiyat") if manual.strip() else None
             return c.portfolio.update_asset(asset)
 

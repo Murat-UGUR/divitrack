@@ -8,13 +8,22 @@ from decimal import Decimal
 
 import pandas as pd
 
-from divitrack.core.entities import Asset, Dividend, Transaction
+from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Transaction
 from divitrack.core.enums import AssetClass, Currency
+from divitrack.core.inflation import monthly_changes
+from divitrack.services.budget_service import MonthSummary
 from divitrack.services.dividend_engine import DividendEvent, EventKind, YieldInfo
+from divitrack.services.insights_service import PlanRow, PurposeRow, RealReturnReport
 from divitrack.services.portfolio_service import PortfolioSummary
 
 # Kategoriler için sabit sıra → sabit renk (renk varlığa bağlıdır, sıralamaya değil)
-CLASS_ORDER = [AssetClass.BIST_STOCK, AssetClass.US_STOCK, AssetClass.CASH, AssetClass.PRECIOUS_METAL]
+CLASS_ORDER = [
+    AssetClass.BIST_STOCK,
+    AssetClass.US_STOCK,
+    AssetClass.CASH,
+    AssetClass.PRECIOUS_METAL,
+    AssetClass.FUND,
+]
 EVENT_ORDER = [EventKind.PAID, EventKind.EXPECTED, EventKind.PROJECTED]
 
 
@@ -34,6 +43,7 @@ def positions_frame(summary: PortfolioSummary, *, include_closed: bool = False) 
                 "Sembol": p.asset.symbol,
                 "Ad": p.asset.name,
                 "Sınıf": p.asset.asset_class.label,
+                "Amaç": p.asset.purpose.label,
                 "PB": p.asset.currency.value,
                 "Adet": _f(p.state.quantity),
                 "Ort. Maliyet": _f(p.state.avg_cost),
@@ -164,3 +174,127 @@ def dividends_frame(divs: Sequence[Dividend], assets: dict[int, Asset]) -> pd.Da
         for d in divs
     ]
     return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------- analiz
+def purpose_frame(rows: Sequence[PurposeRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Amaç": r.purpose.label,
+                "Değer": float(r.value),
+                "Pay %": float(r.weight * 100),
+                "Hedef %": float(r.target * 100),
+                "Sapma (puan)": float(r.drift_pp),
+                "Varlıklar": ", ".join(r.symbols),
+            }
+            for r in rows
+        ],
+        columns=["Amaç", "Değer", "Pay %", "Hedef %", "Sapma (puan)", "Varlıklar"],
+    )
+
+
+def real_returns_frame(report: RealReturnReport) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Sembol": r.asset.symbol + ("" if r.is_open else " (kapalı)"),
+                "Amaç": r.asset.purpose.label,
+                "Yatırılan (TL)": float(r.invested),
+                "Bugünkü karşılığı (TL)": _f(r.invested_real),
+                "Güncel değer (TL)": float(r.value),
+                "Nominal %": _f(r.nominal_pct),
+                "Reel %": _f(r.real_pct),
+                "Reel K/Z (TL)": _f(r.real_gain),
+                "Kur": "≈ güncel" if r.approx_fx else "",
+            }
+            for r in report.rows
+        ],
+        columns=[
+            "Sembol",
+            "Amaç",
+            "Yatırılan (TL)",
+            "Bugünkü karşılığı (TL)",
+            "Güncel değer (TL)",
+            "Nominal %",
+            "Reel %",
+            "Reel K/Z (TL)",
+            "Kur",
+        ],
+    )
+
+
+def plan_frame(rows: Sequence[PlanRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Amaç": r.purpose.label,
+                "Yatırılacak": float(r.amount),
+                "Şu anki pay %": float(r.weight_before * 100),
+                "Sonraki pay %": float(r.weight_after * 100),
+                "Hedef %": float(r.target * 100),
+                "Mevcut varlıklar": ", ".join(r.symbols) or "—",
+            }
+            for r in rows
+        ],
+        columns=["Amaç", "Yatırılacak", "Şu anki pay %", "Sonraki pay %", "Hedef %", "Mevcut varlıklar"],
+    )
+
+
+# --------------------------------------------------------------------------- bütçe
+def budget_lines_frame(summary: MonthSummary) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Kategori": ln.category.name,
+                "Tür": ln.category.kind.label,
+                "Gerçekleşen": float(ln.actual),
+                "Bütçe": _f(ln.budget),
+                "Kalan": _f(ln.remaining),
+                "Kullanım %": _f(ln.used_pct),
+            }
+            for ln in summary.lines
+        ],
+        columns=["Kategori", "Tür", "Gerçekleşen", "Bütçe", "Kalan", "Kullanım %"],
+    )
+
+
+def budget_history_frame(history: Sequence[MonthSummary]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Ay": m.label,
+                "Gelir": float(m.income),
+                "Gider": float(m.expense),
+                "Net": float(m.net),
+                "Tasarruf %": _f(m.savings_rate),
+            }
+            for m in history
+        ],
+        columns=["Ay", "Gelir", "Gider", "Net", "Tasarruf %"],
+    )
+
+
+def flows_frame(flows: Sequence[CashFlow], categories: dict[int, Category]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "ID": f.id,
+                "Tarih": f.flow_date,
+                "Kategori": categories[f.category_id].name if f.category_id in categories else "?",
+                "Tür": categories[f.category_id].kind.label if f.category_id in categories else "",
+                "Tutar": float(f.amount),
+                "Not": f.note,
+            }
+            for f in flows
+        ],
+        columns=["ID", "Tarih", "Kategori", "Tür", "Tutar", "Not"],
+    )
+
+
+def cpi_frame(index: dict[str, Decimal]) -> pd.DataFrame:
+    changes = dict(monthly_changes(index))
+    return pd.DataFrame(
+        [{"Ay": m, "Endeks": float(v), "Aylık %": _f(changes.get(m))} for m, v in sorted(index.items(), reverse=True)],
+        columns=["Ay", "Endeks", "Aylık %"],
+    )

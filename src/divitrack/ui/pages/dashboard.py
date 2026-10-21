@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from divitrack.core.money import ZERO
+from divitrack.core.planning import score_grade
 from divitrack.services.dividend_engine import EventKind
 from divitrack.services.snapshot_service import snapshots_to_rows
 from divitrack.ui.components import charts
@@ -72,14 +73,36 @@ def render() -> None:
 
     if summary.realized_pnl:
         st.caption(f"Gerçekleşen K/Z (satışlardan): **{fmt_signed_money(summary.realized_pnl, base)}**")
-    if summary.unpriced:
-        st.warning(
-            "Fiyatı alınamayan varlıklar toplama dahil edilmedi: "
-            + ", ".join(a.symbol for a in summary.unpriced)
-            + ". Sembolü kontrol edin veya manuel fiyat girin."
+
+    # --- Sağlık puanı ve dikkat edilecekler -------------------------------------
+    real = c.insights.real_returns()
+    rules = c.insights.rules()
+    health = c.insights.health(summary, real, rules)
+    alerts = c.insights.alerts(summary, real, rules)
+    left, right = st.columns([1, 3])
+    with left:
+        score = health.score
+        st.metric(
+            "Portföy sağlık puanı",
+            "—" if score is None else f"{score}/100",
+            delta=score_grade(score),
+            delta_color="off",
+            help="Amaç dağılımı, yoğunlaşma, deneme bütçesi, enflasyon, çeşitlilik ve tasarruf oranından hesaplanır. "
+            "Ayrıntılar Analiz sayfasında.",
         )
-    if summary.stale:
-        st.warning("Bazı fiyatlar güncellenemedi; önbellekteki son değerler gösteriliyor.")
+        if health.potential:
+            best = health.potential[0]
+            st.caption(f"En çok puan kazandıracak: **{best.title}** (+{best.missing:g})")
+    with right:
+        st.markdown("**Dikkat edilecekler**")
+        if not alerts:
+            st.success("Şu an dikkat gerektiren bir durum yok.")
+        for alert in alerts[:4]:
+            getattr(st, alert.level)(alert.text)
+        if len(alerts) > 4:
+            with st.expander(f"{len(alerts) - 4} uyarı daha"):
+                for alert in alerts[4:]:
+                    getattr(st, alert.level)(alert.text)
 
     # --- Grafikler ----------------------------------------------------------
     left, right = st.columns([2, 3])
