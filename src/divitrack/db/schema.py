@@ -168,6 +168,22 @@ MIGRATIONS: list[str] = [
         ('Ulaşım', 'EXPENSE'), ('Sağlık', 'EXPENSE'), ('Eğitim', 'EXPENSE'),
         ('Yeme-içme / eğlence', 'EXPENSE'), ('Giyim', 'EXPENSE'), ('Diğer gider', 'EXPENSE');
     """,
+    # --- v3: döküm eşleme kuralları, aylık puan geçmişi -------------------------
+    """
+    -- Banka dökümü açıklamasında geçen metin → kategori
+    CREATE TABLE category_rules (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        pattern     TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+        category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE
+    );
+
+    -- Ay başına portföy sağlık puanı (ayın son kaydı tutulur)
+    CREATE TABLE score_history (
+        month      TEXT PRIMARY KEY,
+        score      TEXT NOT NULL,
+        components TEXT NOT NULL DEFAULT '{}'
+    );
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -182,4 +198,6 @@ DATA_TABLES = (
     "categories",
     "cash_flows",
     "cpi_monthly",
+    "category_rules",
+    "score_history",
 )

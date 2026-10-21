@@ -61,6 +61,9 @@ def _seed(db: Path) -> None:
     rules = c.insights.rules()
     rules.declaration_limit = D("10000")
     c.insights.save_rules(rules)
+    c.budget.add_rule("migros", market.id)
+    for month in (date(2026, 8, 1), date(2026, 9, 1)):
+        c.insights.record_score(c.insights.health(c.portfolio.summary(Currency.TRY)), day=month)
     c.dividends.record(
         Dividend(
             asset_id=stock.id,

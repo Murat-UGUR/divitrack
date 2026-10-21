@@ -13,9 +13,11 @@ from divitrack.repositories.sqlite import (
     AssetRepository,
     CashFlowRepository,
     CategoryRepository,
+    CategoryRuleRepository,
     CpiRepository,
     DividendRepository,
     PriceCacheRepository,
+    ScoreHistoryRepository,
     SettingsRepository,
     SnapshotRepository,
     TransactionRepository,
@@ -92,7 +94,7 @@ def build_container(
 
     market = MarketDataService(provider, PriceCacheRepository(db), settings.price_cache_ttl_min)
     portfolio = PortfolioService(assets, txs, market)
-    budget = BudgetService(categories, flows, settings_repo)
+    budget = BudgetService(categories, flows, settings_repo, CategoryRuleRepository(db))
     return Container(
         settings=settings,
         db=db,
@@ -101,8 +103,10 @@ def build_container(
         portfolio=portfolio,
         dividends=DividendEngine(divs, settings_repo, provider),
         snapshots=SnapshotService(snaps, portfolio),
-        transfer=DataTransferService(db, assets, txs, divs, snaps, settings_repo, categories, flows, cpi),
+        transfer=DataTransferService(
+            db, assets, txs, divs, snaps, settings_repo, categories, flows, cpi, CategoryRuleRepository(db)
+        ),
         budget=budget,
-        insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo),
+        insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db)),
         cpi=cpi,
     )

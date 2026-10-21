@@ -20,10 +20,14 @@ def to_decimal(value: object, *, field: str = "değer") -> Decimal:
     if isinstance(value, float):
         value = repr(value)
     text = str(value).strip().replace(" ", "")
-    if "," in text and "." in text:  # 1.234,56 → 1234.56
+    if "," in text and "." in text and text.rfind(",") > text.rfind("."):  # 1.234,56 → 1234.56
         text = text.replace(".", "").replace(",", ".")
+    elif ("," in text and "." in text) or text.count(",") > 1:  # 1,234.56 veya 1,234,567 (İngilizce)
+        text = text.replace(",", "")
     elif "," in text:
         text = text.replace(",", ".")
+    elif text.count(".") > 1:  # 1.234.567
+        text = text.replace(".", "")
     try:
         result = Decimal(text)
     except InvalidOperation as exc:

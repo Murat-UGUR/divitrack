@@ -13,7 +13,7 @@ from divitrack.ui.components import charts
 from divitrack.ui.components.widgets import consume_force_refresh, sidebar
 from divitrack.ui.formatting import fmt_money, fmt_pct, fmt_signed_money
 from divitrack.ui.state import get_container, show_flashes
-from divitrack.ui.tables import purpose_frame, real_returns_frame
+from divitrack.ui.tables import purpose_frame, real_returns_frame, report_card_frame, score_history_frame
 
 NUM = st.column_config.NumberColumn
 
@@ -33,15 +33,25 @@ def render() -> None:
         real = c.insights.real_returns()
         health = c.insights.health(summary, real, rules)
 
-    tab_alloc, tab_real, tab_score, tab_whatif = st.tabs(
-        ["Amaçlara göre dağılım", "Enflasyona göre", "Sağlık puanı", "Ya şöyle olursa?"]
+    tab_alloc, tab_cards, tab_real, tab_score, tab_whatif = st.tabs(
+        ["Amaçlara göre dağılım", "Varlık karnesi", "Enflasyona göre", "Sağlık puanı", "Ya şöyle olursa?"]
     )
     with tab_alloc:
         _allocation(c, summary, rules)
     with tab_real:
         _real_returns(real)
+    with tab_cards:
+        _report_cards(c, summary, real, rules)
     with tab_score:
         _health(health)
+        history = c.insights.score_history()
+        if len(history) >= 2:
+            st.markdown("**Puanın seyri**")
+            st.plotly_chart(
+                charts.score_line(score_history_frame(history)), width="stretch", config={"displayModeBar": False}
+            )
+        else:
+            st.caption("Puan her ay Portföy Özeti açıldığında kaydedilir; iki aydan sonra seyri burada görünür.")
     with tab_whatif:
         _what_if(c, summary)
 
@@ -130,6 +140,32 @@ def _health(health) -> None:  # type: ignore[no-untyped-def]
                 right.markdown("_veri yok_")
             if comp.tip:
                 left.caption(f"→ {comp.tip}")
+
+
+def _report_cards(c, summary, real, rules) -> None:  # type: ignore[no-untyped-def]
+    pairs = [(pv.asset, pv.state) for pv in summary.open_positions]
+    quotes = {pv.asset.id: pv.quote for pv in summary.open_positions}
+    yields = {
+        a.id: c.dividends.yield_info(a, s, quotes.get(a.id)).current_yield
+        for a, s in pairs
+        if a.asset_class in (AssetClass.BIST_STOCK, AssetClass.US_STOCK, AssetClass.FUND)
+    }
+    cards = c.insights.report_cards(summary, real, yields, rules)
+    st.caption(
+        'Her kalem için ağırlık, getiri ve temettü verimi; kurallarınıza takılan durumlar "İşaretler" '
+        "kolonunda. İşaretsiz kalem **İyi**, bir işaret **İzle**, iki ve üstü **Dikkat**."
+    )
+    st.dataframe(
+        report_card_frame(cards),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Ağırlık %": NUM(format="%.1f"),
+            "K/Z %": NUM(format="%+.1f"),
+            "Reel %": NUM(format="%+.1f"),
+            "Temettü verimi %": NUM(format="%.2f"),
+        },
+    )
 
 
 SHOCK_CLASSES = [AssetClass.BIST_STOCK, AssetClass.US_STOCK, AssetClass.PRECIOUS_METAL, AssetClass.FUND]

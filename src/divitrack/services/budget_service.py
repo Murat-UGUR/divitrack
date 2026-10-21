@@ -12,7 +12,13 @@ from divitrack.core.entities import CashFlow, Category
 from divitrack.core.enums import FlowKind
 from divitrack.core.exceptions import ValidationError
 from divitrack.core.money import HUNDRED, ONE, ZERO, pct
-from divitrack.repositories.sqlite import CashFlowRepository, CategoryRepository, SettingsRepository
+from divitrack.core.statement import StatementRow, match_category, tr_lower
+from divitrack.repositories.sqlite import (
+    CashFlowRepository,
+    CategoryRepository,
+    CategoryRuleRepository,
+    SettingsRepository,
+)
 
 SAVINGS_TARGET_KEY = "budget.savings_target"
 INVEST_SHARE_KEY = "budget.invest_share"
@@ -81,18 +87,46 @@ class MonthSummary:
         return f"{self.month.year}-{self.month.month:02d}"
 
 
+@dataclass(frozen=True, slots=True)
+class StatementPreview:
+    row: StatementRow
+    category_id: int | None  # kurala göre eşleşen kategori (yoksa None → varsayılan kullanılır)
+    duplicate: bool  # aynı tarih, tutar ve açıklamayla zaten kayıtlı
+
+
+@dataclass(slots=True)
+class StatementImportReport:
+    imported: int = 0
+    by_rule: int = 0
+    manual: int = 0
+    defaulted: int = 0
+    duplicates: int = 0
+
+    def __str__(self) -> str:
+        text = (
+            f"{self.imported} kayıt içe aktarıldı ({self.by_rule} kuralla, {self.manual} elle seçilen, "
+            f"{self.defaulted} varsayılan kategoriyle)"
+        )
+        return text + (f"; {self.duplicates} mükerrer kayıt atlandı" if self.duplicates else "")
+
+
+NOTE_LIMIT = 200
+
+
 class BudgetService:
     def __init__(
         self,
         categories: CategoryRepository,
         flows: CashFlowRepository,
         settings: SettingsRepository,
+        rules: CategoryRuleRepository,
         *,
         today: Callable[[], date] = date.today,
     ) -> None:
         self.categories = categories
         self.flows = flows
         self.settings = settings
+        self.rules = rules
         self.today = today
 
     # ------------------------------------------------------------------ ayarlar
@@ -219,3 +253,76 @@ class BudgetService:
         """Ayın net tasarrufunun yatırıma ayrılan kısmı (negatifse 0)."""
         net = self.month_summary(month).net
         return max(ZERO, net) * self.invest_share
+
+    # ------------------------------------------------------------------ döküm kuralları
+    def list_rules(self) -> list[tuple[int, str, int]]:
+        return self.rules.list()
+
+    def add_rule(self, pattern: str, category_id: int) -> None:
+        text = " ".join(pattern.split())
+        if len(text) < 2:
+            raise ValidationError("Kural en az 2 karakter olmalı")
+        self.categories.get(category_id)
+        self.rules.upsert(text, category_id)
+
+    def delete_rule(self, rule_id: int) -> None:
+        self.rules.delete(rule_id)
+
+    # ------------------------------------------------------------------ döküm içe aktarma
+    @staticmethod
+    def _flow_key(day: date, amount: Decimal, note: str) -> tuple[date, Decimal, str]:
+        return day, abs(amount).normalize(), tr_lower(note)[:NOTE_LIMIT]
+
+    def preview_statement(self, rows: list[StatementRow]) -> list[StatementPreview]:
+        rules = [(pattern, cid) for _, pattern, cid in self.rules.list()]
+        start = min((r.day for r in rows), default=None)
+        existing = {self._flow_key(f.flow_date, f.amount, f.note) for f in self.flows.list(start)} if start else set()
+        return [
+            StatementPreview(
+                r,
+                match_category(r.description, rules),
+                self._flow_key(r.day, r.amount, r.description) in existing,
+            )
+            for r in rows
+        ]
+
+    def import_statement(
+        self,
+        rows: list[StatementRow],
+        *,
+        income_category_id: int,
+        expense_category_id: int,
+        overrides: dict[int, int] | None = None,
+        skip_duplicates: bool = True,
+    ) -> StatementImportReport:
+        """Döküm satırlarını gelir/gider kaydı olarak yazar.
+
+        Kategori önceliği: kullanıcının satır için seçtiği (`overrides`, satır no → kategori) > kural >
+        varsayılan. Seçilen kategorinin türü tutarın işaretiyle uyuşmazsa varsayılan kullanılır.
+        """
+        cats = {c.id: c for c in self.categories.list()}
+        for cid, kind in ((income_category_id, FlowKind.INCOME), (expense_category_id, FlowKind.EXPENSE)):
+            if cid not in cats or cats[cid].kind is not kind:
+                raise ValidationError(f"Varsayılan {kind.label.lower()} kategorisi geçersiz")
+        overrides = overrides or {}
+        report = StatementImportReport()
+        flows: list[CashFlow] = []
+        for item in self.preview_statement(rows):
+            if item.duplicate and skip_duplicates:
+                report.duplicates += 1
+                continue
+            kind = FlowKind.EXPENSE if item.row.is_expense else FlowKind.INCOME
+            default = expense_category_id if kind is FlowKind.EXPENSE else income_category_id
+            chosen = overrides.get(item.row.line, item.category_id)
+            if chosen is not None and chosen in cats and cats[chosen].kind is kind:
+                if item.row.line in overrides:
+                    report.manual += 1
+                else:
+                    report.by_rule += 1
+            else:
+                chosen = default
+                report.defaulted += 1
+            flows.append(CashFlow(chosen, item.row.day, abs(item.row.amount), item.row.description[:NOTE_LIMIT]))
+        self.flows.add_many(flows)
+        report.imported = len(flows)
+        return report

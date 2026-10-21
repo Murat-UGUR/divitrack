@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable, Sequence
 from datetime import date, datetime
@@ -437,3 +438,38 @@ class CpiRepository(_Repo):
                 "ON CONFLICT(month) DO UPDATE SET value=excluded.value",
                 (month, _s(value)),
             )
+
+
+class CategoryRuleRepository(_Repo):
+    def list(self) -> list[tuple[int, str, int]]:
+        """(id, kalıp, kategori id) listesi."""
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT id, pattern, category_id FROM category_rules ORDER BY pattern").fetchall()
+        return [(r["id"], r["pattern"], r["category_id"]) for r in rows]
+
+    def upsert(self, pattern: str, category_id: int) -> None:
+        with self.db.transaction() as c:
+            c.execute(
+                "INSERT INTO category_rules(pattern, category_id) VALUES (?, ?) "
+                "ON CONFLICT(pattern) DO UPDATE SET category_id=excluded.category_id",
+                (pattern, category_id),
+            )
+
+    def delete(self, rule_id: int) -> None:
+        with self.db.transaction() as c:
+            c.execute("DELETE FROM category_rules WHERE id=?", (rule_id,))
+
+
+class ScoreHistoryRepository(_Repo):
+    def upsert(self, month: str, score: Decimal, components: dict[str, str]) -> None:
+        with self.db.transaction() as c:
+            c.execute(
+                "INSERT INTO score_history(month, score, components) VALUES (?, ?, ?) "
+                "ON CONFLICT(month) DO UPDATE SET score=excluded.score, components=excluded.components",
+                (month, _s(score), json.dumps(components, ensure_ascii=False)),
+            )
+
+    def list(self) -> list[tuple[str, Decimal, dict[str, str]]]:
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT month, score, components FROM score_history ORDER BY month").fetchall()
+        return [(r["month"], Decimal(r["score"]), json.loads(r["components"])) for r in rows]

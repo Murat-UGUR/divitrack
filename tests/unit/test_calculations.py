@@ -70,7 +70,18 @@ def test_invalid_transaction() -> None:
         tx(TxType.BUY, "0", "10", date(2024, 1, 1))
 
 
-@pytest.mark.parametrize("raw,expected", [("1.234,56", "1234.56"), ("12,5", "12.5"), ("7", "7"), (0.1, "0.1")])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("1.234,56", "1234.56"),
+        ("12,5", "12.5"),
+        ("7", "7"),
+        (0.1, "0.1"),
+        ("1,234.56", "1234.56"),
+        ("1.234.567", "1234567"),
+        ("1,234,567", "1234567"),
+    ],
+)
 def test_to_decimal_turkish_formats(raw: object, expected: str) -> None:
     assert to_decimal(raw) == D(expected)
 

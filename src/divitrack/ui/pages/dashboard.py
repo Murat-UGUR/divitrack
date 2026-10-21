@@ -78,6 +78,7 @@ def render() -> None:
     real = c.insights.real_returns()
     rules = c.insights.rules()
     health = c.insights.health(summary, real, rules)
+    c.insights.record_score(health)
     alerts = c.insights.alerts(summary, real, rules)
     left, right = st.columns([1, 3])
     with left:

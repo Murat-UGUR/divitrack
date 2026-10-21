@@ -16,6 +16,8 @@ from divitrack.ui.tables import (
     positions_frame,
     purpose_frame,
     real_returns_frame,
+    report_card_frame,
+    score_history_frame,
 )
 
 
@@ -78,3 +80,16 @@ def test_analysis_and_budget_frames(container) -> None:
     assert cpi["Ay"].tolist() == ["2026-02", "2026-01"]
     assert round(cpi["Aylık %"].iloc[0], 2) == 3.0
     assert budget_lines_frame(c.budget.month_summary(date(2000, 1, 1))).empty
+
+
+def test_report_card_and_score_frames(container) -> None:
+    c = container
+    a = c.portfolio.add_asset(Asset("THYAO", AssetClass.BIST_STOCK, Currency.TRY))
+    c.portfolio.add_transaction(
+        Transaction(asset_id=a.id, tx_type=TxType.BUY, quantity=D("1"), price=D("100"), trade_date=date(2024, 1, 1))
+    )
+    s = c.portfolio.summary(Currency.TRY)
+    df = report_card_frame(c.insights.report_cards(s))
+    assert df["Sembol"].tolist() == ["THYAO"] and "Amaç atanmamış" in df["İşaretler"].iloc[0]
+    assert score_history_frame([("2026-09", D("71"))])["Puan"].tolist() == [71.0]
+    assert report_card_frame([]).empty

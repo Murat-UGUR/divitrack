@@ -15,7 +15,7 @@ from decimal import Decimal
 from divitrack.core.entities import Asset, Transaction
 from divitrack.core.enums import AssetClass, Currency, DividendStatus, Purpose, TxType
 from divitrack.core.exceptions import ValidationError
-from divitrack.core.inflation import inflation_factor, latest_month
+from divitrack.core.inflation import inflation_factor, latest_month, month_key
 from divitrack.core.money import HUNDRED, ONE, ZERO, pct
 from divitrack.core.planning import (
     ScoreComponent,
@@ -25,7 +25,13 @@ from divitrack.core.planning import (
     total_score,
     weights,
 )
-from divitrack.repositories.sqlite import CpiRepository, DividendRepository, SettingsRepository, TransactionRepository
+from divitrack.repositories.sqlite import (
+    CpiRepository,
+    DividendRepository,
+    ScoreHistoryRepository,
+    SettingsRepository,
+    TransactionRepository,
+)
 from divitrack.services.budget_service import BudgetService, add_months
 from divitrack.services.market.market_data_service import MarketDataService, value_on
 from divitrack.services.portfolio_service import PortfolioService, PortfolioSummary
@@ -199,6 +205,24 @@ class Health:
         return sorted((c for c in self.components if c.missing > 0), key=lambda c: -c.missing)
 
 
+@dataclass(frozen=True, slots=True)
+class AssetCard:
+    """Varlık karnesi: tek bakışta bir kalemin portföydeki durumu ve işaretleri."""
+
+    asset: Asset
+    weight: Decimal | None  # 0–1
+    nominal_pct: Decimal | None
+    real_pct: Decimal | None
+    dividend_yield: Decimal | None  # %
+    flags: tuple[str, ...]
+
+    @property
+    def grade(self) -> str:
+        if not self.flags:
+            return "İyi"
+        return "Dikkat" if len(self.flags) >= 2 else "İzle"
+
+
 # --------------------------------------------------------------------------- servis
 class InsightsService:
     def __init__(
@@ -210,6 +234,7 @@ class InsightsService:
         cpi: CpiRepository,
         market: MarketDataService,
         settings: SettingsRepository,
+        scores: ScoreHistoryRepository,
         *,
         today: Callable[[], date] = date.today,
     ) -> None:
@@ -220,6 +245,7 @@ class InsightsService:
         self.cpi = cpi
         self.market = market
         self.settings = settings
+        self.scores = scores
         self.today = today
 
     # ------------------------------------------------------------------ kurallar
@@ -531,6 +557,62 @@ class InsightsService:
             )
         )
         return Health(comps)
+
+    # ------------------------------------------------------------------ puan geçmişi
+    def record_score(self, health: Health, *, day: date | None = None) -> None:
+        """Ayın puanını kaydeder (aynı ay içinde son değer kalır)."""
+        score = health.score
+        if score is None:
+            return
+        parts = {c.key: f"{c.points}/{c.max_points}" for c in health.components if c.available}
+        self.scores.upsert(month_key(day or self.today()), score, parts)
+
+    def score_history(self) -> list[tuple[str, Decimal]]:
+        return [(m, s) for m, s, _ in self.scores.list()]
+
+    # ------------------------------------------------------------------ varlık karnesi
+    def report_cards(
+        self,
+        summary: PortfolioSummary,
+        real: RealReturnReport | None = None,
+        yields: dict[int, Decimal | None] | None = None,
+        rules: PlanRules | None = None,
+    ) -> list[AssetCard]:
+        rules = rules or self.rules()
+        real_rows = {r.asset.id: r for r in real.rows} if real else {}
+        yields = yields or {}
+        cards: list[AssetCard] = []
+        for pv in summary.open_positions:
+            aid = pv.asset.id
+            weight = (
+                pv.market_value_base / summary.total_value
+                if pv.market_value_base is not None and summary.total_value > 0
+                else None
+            )
+            rr = real_rows.get(aid)
+            flags: list[str] = []
+            if pv.market_value_base is None:
+                flags.append("Fiyat yok")
+            if weight is not None and weight > rules.single_position_max:
+                flags.append("Tek kalem sınırı aşıldı")
+            if pv.asset.purpose is Purpose.UNASSIGNED:
+                flags.append("Amaç atanmamış")
+            if rr is not None and rr.real_pct is not None and rr.real_pct < 0:
+                flags.append("Enflasyonun gerisinde")
+            dy = yields.get(aid or -1)
+            if pv.asset.purpose is Purpose.DIVIDEND and (dy is None or dy <= 0):
+                flags.append("Temettü amacında ama temettü yok")
+            cards.append(
+                AssetCard(
+                    pv.asset,
+                    weight,
+                    pv.unrealized_pct,
+                    rr.real_pct if rr else None,
+                    dy,
+                    tuple(flags),
+                )
+            )
+        return sorted(cards, key=lambda c: (-len(c.flags), -(c.weight or ZERO)))
 
     # ------------------------------------------------------------------ uyarılar
     def alerts(

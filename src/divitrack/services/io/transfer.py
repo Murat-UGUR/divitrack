@@ -21,6 +21,7 @@ from divitrack.repositories.sqlite import (
     AssetRepository,
     CashFlowRepository,
     CategoryRepository,
+    CategoryRuleRepository,
     CpiRepository,
     DividendRepository,
     SettingsRepository,
@@ -29,7 +30,7 @@ from divitrack.repositories.sqlite import (
 )
 
 FORMAT_NAME = "divitrack-export"
-FORMAT_VERSION = 2  # v2: amaç, kurumsal işlemler, bütçe ve TÜFE
+FORMAT_VERSION = 3  # v2: amaç, kurumsal işlemler, bütçe, TÜFE · v3: döküm kuralları
 
 TX_COLUMNS = ["date", "symbol", "asset_class", "currency", "type", "quantity", "price", "fee", "note"]
 DIV_COLUMNS = [
@@ -85,11 +86,13 @@ class DataTransferService:
         categories: CategoryRepository,
         flows: CashFlowRepository,
         cpi: CpiRepository,
+        rules: CategoryRuleRepository,
     ) -> None:
         self.db = db
         self.categories = categories
         self.flows = flows
         self.cpi = cpi
+        self.rules = rules
         self.assets = assets
         self.transactions = transactions
         self.dividends = dividends
@@ -160,6 +163,7 @@ class DataTransferService:
                 for f in reversed(self.flows.list())
             ],
             "cpi": {m: _s(v) for m, v in sorted(self.cpi.all().items())},
+            "category_rules": [{"pattern": pattern, "category_id": cid} for _, pattern, cid in self.rules.list()],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -235,7 +239,8 @@ class DataTransferService:
             for f in data.get("cash_flows", [])
         ]
         cpi = {parse_month(m): to_decimal(v) for m, v in (data.get("cpi") or {}).items()}
-        return assets, txs, divs, snaps, settings, categories, flows, cpi
+        rules = [(str(r["pattern"]), int(r["category_id"])) for r in data.get("category_rules", [])]
+        return assets, txs, divs, snaps, settings, categories, flows, cpi, rules
 
     def _apply(
         self,
@@ -247,6 +252,7 @@ class DataTransferService:
         categories: list[tuple[int, Category]],
         flows: list[tuple[int, date, Decimal, str]],
         cpi: dict[str, Decimal],
+        rules: list[tuple[str, int]],
     ) -> ImportReport:
         report = ImportReport()
         id_map: dict[int, int] = {}
@@ -320,6 +326,9 @@ class DataTransferService:
             new_flows.append(CashFlow(cid, d, amount, note))
         self.flows.add_many(new_flows)
         report.cash_flows = len(new_flows)
+        for pattern, old_cat in rules:
+            if old_cat in cat_map:
+                self.rules.upsert(pattern, cat_map[old_cat])
         if cpi:
             self.cpi.replace_all({**self.cpi.all(), **cpi})
         return report
@@ -341,6 +350,7 @@ class DataTransferService:
                 "price_cache",
                 "cash_flows",
                 "cpi_monthly",
+                "score_history",
             ):
                 c.execute(f"DELETE FROM {table}")
 

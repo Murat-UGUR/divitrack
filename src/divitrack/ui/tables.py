@@ -13,7 +13,7 @@ from divitrack.core.enums import AssetClass, Currency
 from divitrack.core.inflation import monthly_changes
 from divitrack.services.budget_service import MonthSummary
 from divitrack.services.dividend_engine import DividendEvent, EventKind, YieldInfo
-from divitrack.services.insights_service import PlanRow, PurposeRow, RealReturnReport
+from divitrack.services.insights_service import AssetCard, PlanRow, PurposeRow, RealReturnReport
 from divitrack.services.portfolio_service import PortfolioSummary
 
 # Kategoriler için sabit sıra → sabit renk (renk varlığa bağlıdır, sıralamaya değil)
@@ -298,3 +298,26 @@ def cpi_frame(index: dict[str, Decimal]) -> pd.DataFrame:
         [{"Ay": m, "Endeks": float(v), "Aylık %": _f(changes.get(m))} for m, v in sorted(index.items(), reverse=True)],
         columns=["Ay", "Endeks", "Aylık %"],
     )
+
+
+def report_card_frame(cards: Sequence[AssetCard]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Durum": c.grade,
+                "Sembol": c.asset.symbol,
+                "Amaç": c.asset.purpose.label,
+                "Ağırlık %": _f(c.weight * 100) if c.weight is not None else None,
+                "K/Z %": _f(c.nominal_pct),
+                "Reel %": _f(c.real_pct),
+                "Temettü verimi %": _f(c.dividend_yield),
+                "İşaretler": " · ".join(c.flags) or "—",
+            }
+            for c in cards
+        ],
+        columns=["Durum", "Sembol", "Amaç", "Ağırlık %", "K/Z %", "Reel %", "Temettü verimi %", "İşaretler"],
+    )
+
+
+def score_history_frame(history: Sequence[tuple[str, Decimal]]) -> pd.DataFrame:
+    return pd.DataFrame([{"Ay": m, "Puan": float(s)} for m, s in history], columns=["Ay", "Puan"])

@@ -206,3 +206,19 @@ def category_vs_budget(df: pd.DataFrame, currency_symbol: str) -> go.Figure:
     fig.update_yaxes(autorange="reversed")
     fig.update_xaxes(gridcolor=GRID, showgrid=True)
     return _layout(fig, height=60 + 40 * len(df))
+
+
+def score_line(df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure(
+        go.Scatter(
+            x=df["Ay"],
+            y=df["Puan"],
+            mode="lines+markers",
+            name="Sağlık puanı",
+            line={"color": SERIES[0], "width": 2},
+            hovertemplate="%{x}<br>Puan: %{y:.0f}<extra></extra>",
+        )
+    )
+    fig.update_yaxes(range=[0, 100])
+    fig.update_xaxes(type="category")
+    return _layout(fig, height=260)
