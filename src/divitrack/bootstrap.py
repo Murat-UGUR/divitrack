@@ -23,6 +23,7 @@ from divitrack.repositories.sqlite import (
     SnapshotRepository,
     TransactionRepository,
 )
+from divitrack.services.analytics_service import AnalyticsService
 from divitrack.services.budget_service import BudgetService
 from divitrack.services.cpi_service import CpiService
 from divitrack.services.dividend_engine import DividendEngine
@@ -53,6 +54,7 @@ class Container:
     cpi: CpiRepository
     inflation: CpiService
     goals: GoalService
+    analytics: AnalyticsService
 
     @property
     def base_currency(self) -> Currency:
@@ -104,6 +106,7 @@ def build_container(
     market = MarketDataService(provider, PriceCacheRepository(db), settings.price_cache_ttl_min)
     portfolio = PortfolioService(assets, txs, market)
     budget = BudgetService(categories, flows, settings_repo, CategoryRuleRepository(db))
+    insights = InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db))
     container = Container(
         settings=settings,
         db=db,
@@ -126,10 +129,11 @@ def build_container(
             GoalRepository(db),
         ),
         budget=budget,
-        insights=InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db)),
+        insights=insights,
         cpi=cpi,
         inflation=CpiService(cpi, settings_repo),
         goals=GoalService(GoalRepository(db), portfolio, budget),
+        analytics=AnalyticsService(portfolio, txs, cpi, market, settings_repo, insights),
     )
     container.insights.goals = container.goals
     return container

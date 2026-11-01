@@ -11,6 +11,13 @@ import pandas as pd
 from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Transaction
 from divitrack.core.enums import AssetClass, Currency
 from divitrack.core.inflation import monthly_changes
+from divitrack.services.analytics_service import (
+    BenchmarkRow,
+    ContributionRow,
+    LotReport,
+    ScenarioRow,
+    price_freshness,
+)
 from divitrack.services.budget_service import MonthSummary
 from divitrack.services.dividend_engine import DividendEvent, EventKind, YieldInfo
 from divitrack.services.insights_service import AssetCard, PlanRow, PurposeRow, RealReturnReport
@@ -54,6 +61,7 @@ def positions_frame(summary: PortfolioSummary, *, include_closed: bool = False) 
                 "K/Z %": _f(p.unrealized_pct),
                 "Ağırlık %": _f(mv / total * 100) if mv is not None and total else None,
                 "Gerçekleşen K/Z": _f(p.realized_pnl_base),
+                "Fiyat durumu": price_freshness(p.quote),
             }
         )
     df = pd.DataFrame(rows)
@@ -321,3 +329,103 @@ def report_card_frame(cards: Sequence[AssetCard]) -> pd.DataFrame:
 
 def score_history_frame(history: Sequence[tuple[str, Decimal]]) -> pd.DataFrame:
     return pd.DataFrame([{"Ay": m, "Puan": float(s)} for m, s in history], columns=["Ay", "Puan"])
+
+
+# --------------------------------------------------------------------------- ek analizler
+def lots_frame(report: LotReport) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Tarih": lot.trade_date,
+                "Sembol": lot.asset.symbol,
+                "Tür": lot.tx_type.label,
+                "Kalan adet": _f(lot.quantity),
+                "Alış (TL)": _f(lot.cost),
+                "Bugün (TL)": _f(lot.value),
+                "Nominal %": _f(lot.nominal_pct),
+                "Enflasyonla alış (TL)": _f(lot.cost_real),
+                "Reel %": _f(lot.real_pct),
+                "Dolar bazında %": _f(lot.usd_pct),
+                "Kur": "≈ güncel" if lot.approx_fx else "",
+            }
+            for lot in report.lots
+        ],
+        columns=[
+            "Tarih",
+            "Sembol",
+            "Tür",
+            "Kalan adet",
+            "Alış (TL)",
+            "Bugün (TL)",
+            "Nominal %",
+            "Enflasyonla alış (TL)",
+            "Reel %",
+            "Dolar bazında %",
+            "Kur",
+        ],
+    )
+
+
+def asset_returns_frame(report: LotReport) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Sembol": r.asset.symbol,
+                "Amaç": r.asset.purpose.label,
+                "Maliyet (TL)": _f(r.cost),
+                "Değer (TL)": _f(r.value),
+                "Nominal %": _f(r.nominal_pct),
+                "Reel %": _f(r.real_pct),
+                "Dolar bazında %": _f(r.usd_pct),
+            }
+            for r in report.by_asset()
+        ],
+        columns=["Sembol", "Amaç", "Maliyet (TL)", "Değer (TL)", "Nominal %", "Reel %", "Dolar bazında %"],
+    )
+
+
+def contributions_frame(rows: Sequence[ContributionRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Ay": r.month,
+                "Yatırılan": float(r.invested),
+                "Çekilen": float(r.withdrawn),
+                "Net": float(r.net),
+                "Birikimli net": float(r.cumulative),
+                "Enflasyonla birikim": _f(r.cumulative_real),
+            }
+            for r in rows
+        ],
+        columns=["Ay", "Yatırılan", "Çekilen", "Net", "Birikimli net", "Enflasyonla birikim"],
+    )
+
+
+def benchmark_frame(rows: Sequence[BenchmarkRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Araç": ("★ " if r.is_portfolio else "") + r.name,
+                "Nominal %": _f(r.nominal_pct),
+                "Reel %": _f(r.real_pct),
+            }
+            for r in rows
+        ],
+        columns=["Araç", "Nominal %", "Reel %"],
+    )
+
+
+def scenario_frame(rows: Sequence[ScenarioRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Amaç": r.purpose.label,
+                "Bugün": float(r.before),
+                "Senaryoda": float(r.after),
+                "Fark": float(r.change),
+                "Fark %": _f(r.change_pct),
+            }
+            for r in rows
+        ],
+        columns=["Amaç", "Bugün", "Senaryoda", "Fark", "Fark %"],
+    )

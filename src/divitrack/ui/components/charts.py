@@ -222,3 +222,50 @@ def score_line(df: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(range=[0, 100])
     fig.update_xaxes(type="category")
     return _layout(fig, height=260)
+
+
+def contributions_chart(df: pd.DataFrame, currency_symbol: str) -> go.Figure:
+    """Ay ay yatırılan para (çubuk) ve birikimli net tutarın nominal/enflasyonlu hali (çizgi)."""
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=df["Ay"],
+            y=df["Net"],
+            name="O ay yatırılan (net)",
+            marker={
+                "color": [SERIES[0] if v >= 0 else SERIES[7] for v in df["Net"]],
+                "line": {"color": SURFACE, "width": 1},
+                "cornerradius": 3,
+            },
+            yaxis="y2",
+            hovertemplate=f"%{{x}}<br>Net: {currency_symbol}%{{y:,.2f}}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["Ay"],
+            y=df["Birikimli net"],
+            name="Birikimli yatırılan",
+            mode="lines",
+            line={"color": NEUTRAL, "width": 2},
+            hovertemplate=f"Birikimli: {currency_symbol}%{{y:,.2f}}<extra></extra>",
+        )
+    )
+    if df["Enflasyonla birikim"].notna().any():
+        fig.add_trace(
+            go.Scatter(
+                x=df["Ay"],
+                y=df["Enflasyonla birikim"],
+                name="Enflasyonla bugünkü karşılığı",
+                mode="lines",
+                line={"color": SERIES[1], "width": 2, "dash": "dot"},
+                hovertemplate=f"Enflasyonla: {currency_symbol}%{{y:,.2f}}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        hovermode="x unified",
+        bargap=0.3,
+        yaxis2={"overlaying": "y", "side": "right", "showgrid": False, "tickfont": {"color": TEXT_MUTED}},
+    )
+    fig.update_xaxes(type="category")
+    return _layout(fig)

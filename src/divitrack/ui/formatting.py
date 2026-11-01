@@ -6,6 +6,18 @@ from decimal import Decimal
 
 from divitrack.core.enums import Currency
 
+MASK = "••••"
+_state = {"masked": False}
+
+
+def set_masked(flag: bool) -> None:
+    """Ekran paylaşımı için tutarları gizler (yüzdeler görünür kalır)."""
+    _state["masked"] = bool(flag)
+
+
+def is_masked() -> bool:
+    return _state["masked"]
+
 
 def _tr(number: str) -> str:
     return number.replace(",", "_").replace(".", ",").replace("_", ".")
@@ -20,6 +32,8 @@ def fmt_number(value: Decimal | float | None, places: int = 2) -> str:
 def fmt_money(value: Decimal | float | None, currency: Currency, places: int = 2) -> str:
     if value is None:
         return "—"
+    if _state["masked"]:
+        return f"{currency.symbol}{MASK}"
     sign = "-" if value < 0 else ""
     return f"{sign}{currency.symbol}{fmt_number(abs(value), places)}"
 
@@ -27,6 +41,8 @@ def fmt_money(value: Decimal | float | None, currency: Currency, places: int = 2
 def fmt_signed_money(value: Decimal | float | None, currency: Currency) -> str:
     if value is None:
         return "—"
+    if _state["masked"]:
+        return fmt_money(value, currency)
     return ("+" if value > 0 else "") + fmt_money(value, currency)
 
 

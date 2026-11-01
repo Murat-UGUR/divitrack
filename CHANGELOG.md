@@ -1,5 +1,16 @@
 # Değişiklik Günlüğü
 
+## [0.6.0] - 2026-11-01
+
+### Eklendi
+- Alım alım getiri: her alış ayrı lot olarak izlenir (satışlar FIFO, bedelsiz lotları orantılı büyütür); lot ve kalem bazında nominal, reel (TÜFE) ve dolar bazında getiri
+- Para akışı: ay ay yatırılan ve çekilen para, birikimli net tutar ve TÜFE ile bugünkü karşılığı (grafik + tablo)
+- Kıyas: portföyün para ağırlıklı yıllık getirisi (XIRR), son 12 ay TÜFE'si ve kullanıcının girdiği araçların (mevduat, BIST, altın…) nominal/reel getirisi
+- Hazır senaryolar (devalüasyon, altında düzeltme, BIST ve ABD borsası düşüşü, kötü gün) ve senaryonun amaçlara etkisi
+- Alım öncesi kontrol (Aylık Plan): bir varlığa para eklenirse tek kalem sınırı, amaç hedefi ve deneme bütçesine etkisi
+- Tutarları gizle: ekran paylaşımı için metriklerde tutarlar maskelenir, tablo ve grafikler bulanıklaşır
+- Portföy tablosunda fiyat durumu kolonu (Güncel / Önbellek / Eski / Manuel)
+
 ## [0.5.0] - 2026-10-21
 
 ### Eklendi

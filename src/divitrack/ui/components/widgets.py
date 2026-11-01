@@ -6,9 +6,15 @@ import streamlit as st
 
 from divitrack.bootstrap import Container
 from divitrack.core.enums import Currency
-from divitrack.ui.formatting import fmt_pct
+from divitrack.ui.formatting import fmt_pct, set_masked
 
 CURRENCIES = list(Currency)
+
+# Gizli modda tablolar ve grafikler bulanıklaşır; metrik ve metinlerdeki tutarlar •••• olur.
+_BLUR_CSS = (
+    "<style>[data-testid='stDataFrame'],[data-testid='stPlotlyChart'],[data-testid='stTable']"
+    "{filter:blur(7px);pointer-events:none;}</style>"
+)
 
 
 def sidebar(c: Container) -> Currency:
@@ -25,6 +31,14 @@ def sidebar(c: Container) -> Currency:
         if choice is not current:
             c.set_base_currency(choice)
             st.rerun()
+        masked = st.toggle(
+            "Tutarları gizle",
+            key="hide_amounts",
+            help="Ekran paylaşırken tutarları gizler: metriklerde •••• gösterilir, tablo ve grafikler bulanıklaşır.",
+        )
+        set_masked(masked)
+        if masked:
+            st.markdown(_BLUR_CSS, unsafe_allow_html=True)
         if st.button("↻ Fiyatları yenile", help="Önbelleği atlayıp güncel fiyatları çeker"):
             st.session_state["force_refresh"] = True
             st.rerun()

@@ -1,4 +1,4 @@
-"""Ayarlar & Veri: hedefler ve kurallar, TÜFE, stopaj oranları, dışa/içe aktarma, yedekleme."""
+"""Ayarlar & Veri: hedefler ve kurallar, TÜFE, kıyas araçları, stopaj oranları, dışa/içe aktarma, yedekleme."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from divitrack.core.enums import AssetClass, Purpose
 from divitrack.core.exceptions import ValidationError
 from divitrack.core.inflation import index_from_changes, latest_month, parse_month
 from divitrack.core.money import HUNDRED, to_decimal
+from divitrack.services.analytics_service import Benchmark
 from divitrack.services.budget_service import add_months
 from divitrack.services.insights_service import PlanRules
 from divitrack.services.io.transfer import TX_COLUMNS
@@ -37,6 +38,7 @@ def render() -> None:
 
     _rules()
     _cpi()
+    _benchmarks()
 
     # --- Stopaj ------------------------------------------------------------------
     st.subheader("Temettü stopaj oranları")
@@ -254,3 +256,40 @@ def _cpi() -> None:
                     c.cpi.replace_all(new)
 
                 run_action(save, "TÜFE tablosu kaydedildi")
+
+
+def _benchmarks() -> None:
+    c = get_container()
+    st.subheader("Kıyas araçları")
+    st.caption(
+        "Portföyünü karşılaştırmak istediğin araçların son bir yıllık nominal getirisi (%): mevduat, BIST 100, "
+        "altın, dolar, fon ortalaması… Değerleri kendi kaynağından gir (ör. TÜİK'in aylık açıkladığı yatırım "
+        "araçları getirileri). Reel getiri Analiz > Kıyas sekmesinde son 12 ayın TÜFE'siyle hesaplanır."
+    )
+    current = pd.DataFrame(
+        [{"Araç": b.name, "Yıllık getiri %": float(b.nominal_pct)} for b in c.analytics.benchmarks()],
+        columns=["Araç", "Yıllık getiri %"],
+    )
+    with st.form("benchmarks"):
+        edited = st.data_editor(
+            current,
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Araç": st.column_config.TextColumn(required=True),
+                "Yıllık getiri %": st.column_config.NumberColumn(format="%.2f", required=True),
+            },
+            key="benchmarks_editor",
+        )
+        if st.form_submit_button("Kıyas araçlarını kaydet"):
+
+            def save() -> None:
+                items = [
+                    Benchmark(str(row["Araç"]).strip(), to_decimal(row["Yıllık getiri %"], field="Yıllık getiri"))
+                    for _, row in edited.iterrows()
+                    if pd.notna(row["Araç"]) and str(row["Araç"]).strip() and pd.notna(row["Yıllık getiri %"])
+                ]
+                c.analytics.save_benchmarks(items)
+
+            run_action(save, "Kıyas araçları kaydedildi")

@@ -50,6 +50,14 @@
 
 **Değer geçmişi.** Dashboard her açıldığında o günün toplamı `portfolio_snapshots` tablosuna yazılır (upsert). `SnapshotService.backfill` işlem defteri + Yahoo geçmiş kapanışları + geçmiş kurlarla ilk işlemden bugüne günlük seriyi yeniden oluşturur.
 
+**Alım bazında getiri.** `core.returns.open_lots` işlem defterini FIFO ile işler: her alış (alış, bedelli, temettüden alış) bir lot açar, satış en eski lottan düşer ve maliyeti orantılı azaltır, bedelsiz/bölünme eldeki tüm lotların adedini aynı oranda büyütür (maliyet değişmez). `AnalyticsService.lots` her lotun maliyetini işlem günü kuruyla TL'ye ve USD'ye çevirir, TÜFE ile bugüne taşır ve güncel fiyatla karşılaştırır. Dolar bazında getiri, TL getirideki kur etkisini ayıklamak içindir. Kur geçmişi alınamazsa güncel kur kullanılır ve satır işaretlenir.
+
+**Para ağırlıklı yıllık getiri ve kıyas.** `core.returns.xirr` düzensiz tarihli akışların yıllık iç verim oranını ikiye bölme yöntemiyle bulur (her zaman yakınsar). Akışlar: alış/bedelli eksi, satış artı, bugünkü toplam değer son günde artı. Bir aydan kısa geçmişte veya fiyatsız pozisyon varken hesap yapılmaz. Reel karşılığı son 12 ayın TÜFE'siyle `(1+n)/(1+tüfe)−1` olarak bulunur. Kıyas araçları (ad + yıllık nominal %) `settings` tablosunda `benchmarks` anahtarıyla JSON olarak tutulur ve yedeğe dahildir.
+
+**Senaryo ve alım öncesi kontrol.** Hazır senaryolar (`PRESETS`) yalnızca varlık sınıfı ve kur şoku sözlükleridir; `scenario_by_purpose` aynı `apply_shocks` fonksiyonunu amaç bazında uygular. `purchase_check` bir tutarın varlığa eklenmesi halinde kalem ve amaç payını yeniden hesaplar; tek kalem sınırını aşmak hata, hedef + toleransın üstüne çıkmak uyarıdır (zaten üstündeyse hata).
+
+**Gizlilik modu.** `ui.formatting.set_masked` açıkken `fmt_money` tutar yerine `••••` döndürür; tablo ve grafikler CSS ile bulanıklaştırılır. Yüzdeler görünür kalır.
+
 ## Veri modeli
 
 ```
@@ -62,7 +70,7 @@ goals ──< goal_assets >── assets — birikim hedefleri
 cpi_monthly (month PK)           — TÜFE endeksi
 price_cache (symbol PK)          — hisseler, GC=F/SI=F, USDTRY=X…
 portfolio_snapshots (date, ccy)  — büyüme grafiği
-settings (key, value)            — para birimi, stopaj, hedefler, kurallar, tasarruf hedefi
+settings (key, value)            — para birimi, stopaj, hedefler, kurallar, tasarruf hedefi, kıyas araçları
 ```
 
 Şema v2, SQLite `CHECK` kısıtları `ALTER` ile değiştirilemediği için `assets`, `transactions` ve `dividends` tablolarını veriyi taşıyarak yeniden kurar. v3 döküm kurallarını ve puan geçmişini ekler. Eski veritabanları açılışta otomatik yükseltilir (`tests/integration/test_budget_insights.py::test_v1_database_upgrades_with_data`).

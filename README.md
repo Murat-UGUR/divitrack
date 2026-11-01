@@ -17,7 +17,12 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Kurumsal İşlemler** | Bedelsiz / bölünme (maliyetsiz adet), bedelli (rüçhan), temettüden alış (yeni para sayılmaz) |
 | **Varlık Sınıfları** | BIST Hisse · ABD Hisse/ETF · Yatırım Fonu · Kıymetli Maden (gram/ons altın ve gümüş) · Nakit/BES (manuel fiyat) |
 | **Amaç ve Hedefler** | Varlık başına amaç; amaç bazlı hedef dağılım, sapma toleransı, tek kalem sınırı, deneme bütçesi |
-| **Analiz** | Amaçlara göre dağılım ve hedef, TÜFE ile reel getiri ("yatırdığın para bugün ne etmeli"), 100 üzerinden sağlık puanı ve puanın nereden geldiği ve aylara göre seyri, kalem kalem varlık karnesi, kur/fiyat şoklu "ya şöyle olursa?" senaryosu |
+| **Analiz** | Amaçlara göre dağılım ve hedef, TÜFE ile reel getiri ("yatırdığın para bugün ne etmeli"), 100 üzerinden sağlık puanı ve puanın nereden geldiği ve aylara göre seyri, kalem kalem varlık karnesi |
+| **Alım alım getiri** | Her alış ayrı lot (satışlar FIFO, bedelsiz orantılı); lot ve kalem bazında **nominal, reel ve dolar bazında** getiri — kur yükselişinin TL getiriyi ne kadar şişirdiğini gösterir |
+| **Para akışı** | Hangi ay ne kadar yatırdın / çektin, birikimli net tutar ve bunun TÜFE ile bugünkü karşılığı |
+| **Kıyas** | Portföyün para ağırlıklı yıllık getirisi (XIRR) ve reel karşılığı; kendi girdiğin mevduat, BIST, altın, dolar gibi araçlarla yan yana |
+| **Senaryolar** | Hazır şablonlar (devalüasyon, altında düzeltme, BIST/ABD düşüşü, kötü gün) veya kendi kur/fiyat şokların; toplam ve amaç bazında etki |
+| **Alım öncesi kontrol** | Bir varlığa para eklemeden önce tek kalem sınırı, amaç hedefi ve deneme bütçesine ne olacağını gösterir |
 | **Dikkat Edilecekler** | Hedef sapması, yoğunlaşma, fiyatsız varlık, eski TÜFE, aşılan bütçe, yaklaşan temettü ve beyan sınırı uyarıları |
 | **Bütçe** | Gelir/gider kategorileri, aylık kategori bütçeleri, tasarruf oranı, 12 aylık seyir |
 | **Banka Dökümü** | Herhangi bir bankanın CSV dökümünü kolon eşleyerek içe aktarma (tek tutar veya Borç/Alacak), açıklamaya göre otomatik kategori kuralları, önizlemede elle düzeltme, mükerrer kayıt koruması |
@@ -25,7 +30,8 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Aylık Plan** | Ayın net tasarrufundan yatırıma ayrılan tutarı satış yapmadan hedefe en çok yaklaştıracak şekilde amaçlara böler; aylık rutin listesi |
 | **Temettü Takibi** | Ödenen/beklenen kayıtlar, stopaj (varsayılan BIST %15, ABD %20 — ayarlanabilir), TTM verim ve maliyete göre verim, 24 aylık takvim grafiği, Yahoo geçmişinden otomatik kayıt önerisi |
 | **Canlı Veri** | `yfinance` ile hisse/ETF/maden fiyatı, temettü geçmişi ve döviz kurları; **TEFAS** ile yatırım fonu fiyatları; **TCMB EVDS** ile TÜFE (kendi API anahtarınızla). SQLite önbelleği, ağ hatasında son bilinen fiyatla çalışma, tam çevrimdışı mod |
-| **Dashboard** | Toplam değer + günlük değişim, K/Z, 12 aylık net temettü beklentisi, sağlık puanı, dikkat edilecekler, varlık dağılımı, zaman içindeki değer grafiği |
+| **Dashboard** | Toplam değer + günlük değişim, K/Z, 12 aylık net temettü beklentisi, sağlık puanı, dikkat edilecekler, varlık dağılımı, zaman içindeki değer grafiği, fiyat durumu (güncel / önbellek / eski / manuel) |
+| **Gizlilik modu** | Kenar çubuğundaki *Tutarları gizle* ile ekran paylaşırken tutarlar maskelenir, tablo ve grafikler bulanıklaşır |
 | **Vergi Ön İzleme** | Yurt dışı temettülerin yıllık brüt TL toplamı ve kendi girdiğiniz beyan sınırına göre doluluk |
 | **Veri Taşınabilirliği** | JSON tam yedek (birleştir/geri yükle), işlem, temettü ve gelir/gider CSV'leri (Excel'in `;` ayracı desteklenir), tek tıkla `.db` yedeği |
 
@@ -55,8 +61,8 @@ docker run -p 127.0.0.1:8501:8501 -v "$(pwd)/data:/app/data" divitrack
 2. **Varlıklar & İşlemler → Varlıklar**: varlığı tanımlayın ve amacını seçin (ör. BIST `THYAO` → Büyüme, `XAU-GRAM` → Koruma).
 3. **Yeni İşlem**: alış/satış ve kurumsal işlemleri girin. Ondalık için `12,5` veya `12.5` yazabilirsiniz.
 4. **Bütçe**: ayın gelir ve giderlerini girin ya da *Banka dökümü* sekmesinden bankanızın CSV'sini yükleyin. Sık geçen açıklamalar için kural tanımlayın (*migros* → Market); sonraki dökümler otomatik kategorilenir.
-5. **Aylık Plan**: bütçeden kalan tutarın amaçlara nasıl bölüneceğini görün, alımları yapıp işlem olarak kaydedin. Birikim hedeflerinizi tanımlayıp ilgili varlıkları bağlayın.
-6. **Portföy Özeti / Analiz**: sağlık puanı, uyarılar, reel getiri ve senaryolar. Değer grafiği için *Geçmişi işlemlerden yeniden oluştur*.
+5. **Aylık Plan**: bütçeden kalan tutarın amaçlara nasıl bölüneceğini görün; bir alımı yapmadan önce *Alım öncesi kontrol* ile kurallarınıza etkisine bakın, sonra işlem olarak kaydedin. Birikim hedeflerinizi tanımlayıp ilgili varlıkları bağlayın.
+6. **Portföy Özeti / Analiz**: sağlık puanı, uyarılar, reel ve dolar bazında getiri, alım alım getiri, para akışı, kıyas ve senaryolar. Değer grafiği için *Geçmişi işlemlerden yeniden oluştur*. Kıyas araçlarını **Ayarlar & Veri > Kıyas araçları** bölümüne gir.
 7. **Temettüler**: *Geçmişten Aktar* sekmesi, elde tuttuğunuz döneme denk gelen ödemeleri tek tıkla kaydeder; beyan sınırı paneli yurt dışı temettüleri izler.
 
 ### Sembol kuralları
@@ -99,10 +105,10 @@ Clean Architecture: bağımlılıklar **yalnızca içe doğru** akar. `core` saf
 ├───────────────────────────────────────────────────────────┤
 │ Services              portfolio · dividend_engine ·       │
 │                       snapshot · market · io/transfer ·   │
-│                       budget · insights                   │
+│                       budget · insights · analytics       │
 ├───────────────────────────────────────────────────────────┤
 │ Core (Domain)         entities · calculations · ports ·   │
-│                       inflation · planning                │
+│                       inflation · planning · returns      │
 ├───────────────────────────────────────────────────────────┤
 │ Infrastructure        db/ (sqlite3) · repositories/ ·     │
 │                       market/yfinance_provider            │

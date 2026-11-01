@@ -1,4 +1,4 @@
-"""Aylık Plan: bütçeden kalan parayı amaçlara bölme ve aylık rutin."""
+"""Aylık Plan: bütçeden kalan parayı amaçlara bölme, alım öncesi kontrol, birikim hedefleri ve aylık rutin."""
 
 from __future__ import annotations
 
@@ -98,12 +98,47 @@ def render() -> None:
     else:
         st.info("Öneriyi görmek için yatırılacak tutarı gir.")
 
+    _purchase_check(c, base, summary, rules)
     _goals()
 
     st.subheader("Aylık rutin")
     st.caption("Her ay aynı sırayla: önce veriyi güncelle, sonra karar ver. İşaretler yalnızca bu oturumda tutulur.")
     for i, (title, detail) in enumerate(ROUTINE, start=1):
         st.checkbox(f"**{i}. {title}** — {detail}", key=f"routine_{i}")
+
+
+CHECK_ICON = {"ok": "✅", "warning": "🟠", "error": "⛔", "info": "ℹ️"}
+
+
+def _purchase_check(c, base, summary, rules) -> None:  # type: ignore[no-untyped-def]
+    st.subheader("Alım öncesi kontrol")
+    st.caption(
+        "Bir varlığa para eklemeden önce kurallarına ne olacağını gör: tek kalem sınırı, amaç hedefi ve "
+        "deneme bütçesi. Tutar raporlama para birimindedir."
+    )
+    assets = c.portfolio.assets.list()
+    if not assets:
+        st.info("Kontrol için önce bir varlık tanımla.")
+        return
+    col1, col2 = st.columns([2, 1])
+    asset = col1.selectbox("Varlık", assets, format_func=lambda a: a.display_name, key="check_asset")
+    raw = col2.text_input(f"Tutar ({base.value})", placeholder="ör. 5.000", key="check_amount")
+    if asset is None or not raw.strip():
+        return
+    try:
+        amount = to_decimal(raw, field="Tutar")
+        check = c.analytics.purchase_check(summary, asset, amount, rules)
+    except DivitrackError as exc:
+        st.error(str(exc))
+        return
+    with st.container(border=True):
+        st.markdown(f"**{check.verdict}** · {asset.symbol} · {fmt_money(amount, base)}")
+        st.caption(
+            f"Kalem payı %{check.weight_before * HUNDRED:.1f} → %{check.weight_after * HUNDRED:.1f} · "
+            f"{asset.purpose.label} payı %{check.purpose_before * HUNDRED:.1f} → %{check.purpose_after * HUNDRED:.1f}"
+        )
+        for item in check.items:
+            st.markdown(f"{CHECK_ICON.get(item.level, '•')} {item.text}")
 
 
 STATUS_ICON = {"Ulaşıldı": "✅", "Yolunda": "🟢", "Geride": "🟠", "Süre doldu": "🔴", "Tasarruf verisi yok": "⚪"}
