@@ -15,6 +15,7 @@ from divitrack.core.ports import PriceProvider
 from divitrack.repositories.sqlite import PriceCacheRepository
 from divitrack.services.market.symbols import (
     DERIVED_GRAM_METALS,
+    GOLD_FUTURES,
     fx_symbol,
     ounce_to_gram_try,
     provider_symbol,
@@ -183,6 +184,24 @@ class MarketDataService:
                 sym = provider_symbol(a)
                 result[a.id] = hist.get(sym, {}) if sym else {}
         return result
+
+    def gold_gram_history(self, start: date) -> Series:
+        """Gram altının TL geçmişi (ons × USD/TRY ÷ 31,1035); altın bazında kıyas için."""
+        hist = self._history([GOLD_FUTURES, fx_symbol(Currency.USD, Currency.TRY)], start)
+        fx = hist.get(fx_symbol(Currency.USD, Currency.TRY), {})
+        series: Series = {}
+        for d, v in hist.get(GOLD_FUTURES, {}).items():
+            rate = value_on(fx, d)
+            if rate is not None:
+                series[d] = ounce_to_gram_try(v, rate)
+        return series
+
+    def gold_gram_price(self) -> Decimal | None:
+        """Gram altının güncel TL fiyatı (önbellek kurallarıyla)."""
+        usd = fx_symbol(Currency.USD, Currency.TRY)
+        raw, _ = self._raw_quotes([GOLD_FUTURES, usd])
+        oz, fx = raw.get(GOLD_FUTURES), raw.get(usd)
+        return ounce_to_gram_try(oz.price, fx.price) if oz is not None and fx is not None else None
 
     def fx_history(self, currencies: Iterable[Currency], base: Currency, start: date) -> dict[Currency, Series]:
         needed = sorted({c for c in currencies if c is not base})

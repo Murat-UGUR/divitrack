@@ -204,3 +204,73 @@ def test_price_freshness_labels() -> None:
     assert price_freshness(old, today) == "Eski (22.10)"
     assert price_freshness(manual, today) == "Manuel"
     assert price_freshness(None, today) == "Fiyat yok"
+
+
+# --------------------------------------------------------------------------- altın bazında, başa baş, ortalama
+@pytest.fixture
+def gold_setup(setup, provider):
+    c, thy, aapl = setup
+    provider.history["GC=F"] = [(date(2024, 1, 1), D("2000"))]  # o gün gram ≈ 1.929 TL, bugün ≈ 3.086 TL
+    c.market.clear_cache()
+    return c, thy, aapl
+
+
+def test_lot_returns_in_gold_terms(gold_setup) -> None:
+    c, _, _ = gold_setup
+    report = c.analytics.lots()
+    gram_then = D("2000") * D("30") / D("31.1034768")
+    gram_now = D("2400") * D("40") / D("31.1034768")
+    assert report.gold_price is not None and abs(report.gold_price - gram_now) < D("0.0001")
+    thy = next(lot for lot in report.lots if lot.asset.symbol == "THYAO")
+    assert thy.cost_gold is not None and abs(thy.cost_gold - D("25000") / gram_then) < D("0.0001")
+    # altın 1,6 katına çıktı (2400×40 / 2000×30); THYAO 1,2 katı → altına göre −%25
+    assert thy.gold_pct is not None and abs(thy.gold_pct - D("-25")) < D("0.001")
+    total = report.total()
+    assert total is not None and total.gold_pct is not None
+    assert abs(total.gold_pct - ((D("110000") / D("70000")) / D("1.6") - 1) * 100) < D("0.001")
+
+
+def test_gold_pct_missing_without_gold_history(setup) -> None:
+    c, _, _ = setup
+    lot = c.analytics.lots().lots[0]
+    assert lot.cost_gold is None and lot.gold_pct is None
+
+
+def test_break_even_prices(gold_setup) -> None:
+    c, _, _ = gold_setup
+    rows = {r.asset.symbol: r for r in c.analytics.break_even()}
+    thy = rows["THYAO"]
+    assert thy.price == D("300") and thy.nominal == D("250")
+    assert thy.nominal_gap_pct is not None and abs(thy.nominal_gap_pct - D("-16.6667")) < D("0.001")  # geçildi
+    assert thy.real == D("500")  # TÜFE 2 katı
+    assert thy.real_gap_pct is not None and abs(thy.real_gap_pct - D("66.6667")) < D("0.001")
+    assert thy.gold is not None and abs(thy.gold - D("400")) < D("0.001")  # 250 × 1,6
+    assert list(rows) == ["AAPL", "THYAO"]  # değere göre sıralı
+
+
+def test_break_even_skips_gold_comparison_for_gram_gold(gold_setup) -> None:
+    c, _, _ = gold_setup
+    gold = c.portfolio.add_asset(Asset("XAU-GRAM", AssetClass.PRECIOUS_METAL, Currency.TRY))
+    add_tx(c, gold, TxType.BUY, "10", "2000")
+    row = next(r for r in c.analytics.break_even() if r.asset.symbol == "XAU-GRAM")
+    assert row.gold is None and row.nominal == D("2000")
+
+
+def test_average_cost_calculator(gold_setup) -> None:
+    c, thy, _ = gold_setup
+    res = c.analytics.average_cost(thy, D("100"), D("150"), target=D("220"))
+    assert res.change.average_before == D("250") and res.change.average_after == D("200")
+    assert res.price_now == D("300")
+    assert res.real_before == D("500") and res.real_after == D("325")  # (50.000 + 15.000) / 200
+    # (25.000 − 220×100) / (220 − 150) = 3.000 / 70
+    assert res.target_quantity is not None and abs(res.target_quantity - D("42.857142")) < D("0.0001")
+    assert res.gap_after_pct is not None and res.gap_after_pct < 0
+
+
+def test_average_cost_validation(gold_setup) -> None:
+    c, thy, _ = gold_setup
+    with pytest.raises(ValidationError):
+        c.analytics.average_cost(thy, D("-1"), D("100"))
+    other = c.portfolio.add_asset(Asset("ASELS", AssetClass.BIST_STOCK, Currency.TRY))
+    with pytest.raises(ValidationError):
+        c.analytics.average_cost(other, D("1"), D("100"))

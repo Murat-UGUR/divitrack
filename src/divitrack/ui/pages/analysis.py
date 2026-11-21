@@ -1,5 +1,5 @@
-"""Analiz: amaç dağılımı, enflasyona ve dolara göre getiri, alım alım getiri, para akışı,
-piyasa araçlarıyla kıyas, sağlık puanı ve senaryolar."""
+"""Analiz: amaç dağılımı, enflasyona, dolara ve altına göre getiri, alım alım getiri, başa baş fiyatları,
+para akışı, piyasa araçlarıyla kıyas, sağlık puanı ve senaryolar."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from divitrack.ui.state import get_container, show_flashes
 from divitrack.ui.tables import (
     asset_returns_frame,
     benchmark_frame,
+    break_even_frame,
     contributions_frame,
     lots_frame,
     purpose_frame,
@@ -45,12 +46,13 @@ def render() -> None:
         real = c.insights.real_returns()
         health = c.insights.health(summary, real, rules)
 
-    tab_alloc, tab_cards, tab_real, tab_lots, tab_flow, tab_bench, tab_score, tab_whatif = st.tabs(
+    tab_alloc, tab_cards, tab_real, tab_lots, tab_be, tab_flow, tab_bench, tab_score, tab_whatif = st.tabs(
         [
             "Amaçlara göre dağılım",
             "Varlık karnesi",
             "Enflasyona göre",
             "Alım alım getiri",
+            "Başa baş",
             "Para akışı",
             "Kıyas",
             "Sağlık puanı",
@@ -65,6 +67,8 @@ def render() -> None:
         _report_cards(c, summary, real, rules)
     with tab_lots:
         _lots(c)
+    with tab_be:
+        _break_even(c)
     with tab_flow:
         _contributions(c)
     with tab_bench:
@@ -265,12 +269,13 @@ def _lots(c) -> None:  # type: ignore[no-untyped-def]
     st.caption(
         "Her alış ayrı bir lot olarak izlenir; satışlar en eski lottan düşülür (FIFO), bedelsiz eldeki "
         "lotların adedini artırır. **Reel**: alış tutarı TÜFE ile bugüne taşınarak; **dolar bazında**: alış "
-        "günü ve bugünkü USD/TL kuruyla karşılaştırılır. Kur yükselişi TL getiriyi şişirebilir; dolar bazındaki "
+        "günü ve bugünkü USD/TL kuruyla; **altın bazında**: aynı parayla alış günü gram altın alınsaydı "
+        "bugün edeceği değerle karşılaştırılır. Kur yükselişi TL getiriyi şişirebilir; dolar ve altın bazındaki "
         "getiri bunu ayıklar."
     )
     total = report.total()
     if total is not None:
-        k1, k2, k3 = st.columns(3)
+        k1, k2, k3, k4 = st.columns(4)
         k1.metric("Nominal (TL)", fmt_pct(total.nominal_pct, 1, signed=True))
         k2.metric(
             "Reel (TÜFE)",
@@ -282,7 +287,17 @@ def _lots(c) -> None:  # type: ignore[no-untyped-def]
             fmt_pct(total.usd_pct, 1, signed=True),
             help=f"Bugünkü USD/TL: {fmt_money(report.usd_rate, Currency.TRY, 4)}" if report.usd_rate else None,
         )
-    pct_cols = {k: NUM(format="%+.1f") for k in ("Nominal %", "Reel %", "Dolar bazında %")}
+        k4.metric(
+            "Altın bazında",
+            fmt_pct(total.gold_pct, 1, signed=True),
+            help=(
+                f"Bugünkü gram altın: {fmt_money(report.gold_price, Currency.TRY)}. Artı: aynı paralarla altın "
+                "almaktan daha iyi durumdasın."
+                if report.gold_price
+                else "Altın fiyat geçmişi alınamadı"
+            ),
+        )
+    pct_cols = {k: NUM(format="%+.1f") for k in ("Nominal %", "Reel %", "Dolar bazında %", "Altın bazında %")}
     st.markdown("**Kalem bazında**")
     st.dataframe(
         asset_returns_frame(report),
@@ -311,6 +326,41 @@ def _lots(c) -> None:  # type: ignore[no-untyped-def]
         notes.append("Fiyatı olmayanların bugünkü değeri boş: " + ", ".join(report.unpriced))
     if notes:
         st.caption(" ".join(notes))
+
+
+def _break_even(c) -> None:  # type: ignore[no-untyped-def]
+    rows = c.analytics.break_even()
+    if not rows:
+        st.info("Elde kalan alım yok.")
+        return
+    st.caption(
+        "Zararı kapatmak için fiyatın nereye gelmesi gerekiyor? **Nominal**: ortalama maliyet. "
+        "**Enflasyona göre**: alımların TÜFE ile bugüne taşınmış maliyeti ÷ adet; bu nokta her ay enflasyon "
+        "kadar yükselir. **Altına göre**: aynı paralarla alış günlerinde gram altın alınsaydı bugünkü değeri "
+        "÷ adet. Fark %: bugünkü fiyattan gereken değişim; eksi ise o eşik zaten geçilmiş."
+    )
+    behind = [r.asset.symbol for r in rows if r.real_gap_pct is not None and r.real_gap_pct > 0]
+    k1, k2 = st.columns(2)
+    k1.metric("Enflasyonun gerisinde", f"{len(behind)} / {len(rows)} kalem")
+    k2.metric(
+        "Nominal zararda",
+        f"{sum(1 for r in rows if r.nominal_gap_pct is not None and r.nominal_gap_pct > 0)} / {len(rows)} kalem",
+    )
+    gap = {k: NUM(format="%+.1f") for k in ("Nominal fark %", "Enflasyon fark %", "Altın fark %")}
+    st.dataframe(
+        break_even_frame(rows),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            **{k: NUM(format="%.4f") for k in ("Fiyat", "Nominal başa baş", "Enflasyona göre", "Altına göre")},
+            **gap,
+        },
+    )
+    st.caption(
+        "Fiyatlar varlığın TL birim fiyatıdır (yabancı varlıklarda bugünkü kurla). Gram altının kendisi için "
+        "altına göre eşik gösterilmez. Ortalamanı düşürmenin etkisini **Aylık Plan > Ortalama maliyet "
+        "hesaplayıcı** ile deneyebilirsin."
+    )
 
 
 def _contributions(c) -> None:  # type: ignore[no-untyped-def]
@@ -346,6 +396,19 @@ def _benchmarks(c) -> None:  # type: ignore[no-untyped-def]
         "kendi girdiğin araçların yıllık getirisi. Reel getiri son 12 ayın TÜFE'siyle hesaplanır. Araçları "
         "**Ayarlar & Veri > Kıyas araçları** bölümünden ekle (ör. mevduat, BIST 100, altın, dolar)."
     )
+    total = c.analytics.lots().total()
+    if total is not None:
+        st.markdown("**Bugüne kadar (gerçekleşen toplam)**")
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Nominal", fmt_pct(total.nominal_pct, 1, signed=True))
+        t2.metric("Enflasyona göre", fmt_pct(total.real_pct, 1, signed=True))
+        t3.metric("Dolara göre", fmt_pct(total.usd_pct, 1, signed=True))
+        t4.metric("Altına göre", fmt_pct(total.gold_pct, 1, signed=True))
+        st.caption(
+            "Toplam, elde kalan alımların bugüne kadarki değişimidir. Aşağıdaki yıllık rakam (XIRR) aynı sonucu "
+            "bir yıla yayar; para birkaç aydır yatırımdaysa yıllık rakam toplamdan çok daha büyük görünür."
+        )
+    st.markdown("**Yıllık (para ağırlıklı)**")
     k1, k2, k3 = st.columns(3)
     k1.metric("Portföy (yıllık, nominal)", fmt_pct(annual.nominal_pct, 1, signed=True))
     k2.metric("Portföy (yıllık, reel)", fmt_pct(annual.real_pct, 1, signed=True))

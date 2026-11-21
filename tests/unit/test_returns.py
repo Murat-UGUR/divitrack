@@ -5,7 +5,14 @@ import pytest
 
 from divitrack.core.entities import Transaction
 from divitrack.core.enums import TxType
-from divitrack.core.returns import open_lots, real_rate, xirr
+from divitrack.core.returns import (
+    average_after_buy,
+    open_lots,
+    quantity_for_target_average,
+    real_rate,
+    required_change,
+    xirr,
+)
 
 
 def tx(t, qty, price, d, fee="0", id_=None):
@@ -87,3 +94,34 @@ def test_xirr_handles_losses() -> None:
 def test_real_rate() -> None:
     assert abs(real_rate(D("0.40"), D("0.30")) - D("0.0769")) < D("0.0001")
     assert real_rate(D("0.30"), D("0.30")) == 0
+
+
+# --------------------------------------------------------------------------- ortalama maliyet ve başa baş
+def test_average_after_buy_lowers_average_when_buying_cheaper() -> None:
+    change = average_after_buy(D("10"), D("70000"), D("10"), D("5000"))  # ort. 7.000, 5.000'den 10 adet
+    assert change.average_before == D("7000")
+    assert change.average_after == D("6000")
+    assert change.quantity_after == D("20")
+    assert change.purchase_amount == D("50000")
+    assert abs(change.change_pct - D("-14.2857")) < D("0.001")
+
+
+def test_average_after_buy_rejects_bad_input() -> None:
+    with pytest.raises(ValueError):
+        average_after_buy(D("0"), D("100"), D("1"), D("1"))
+    with pytest.raises(ValueError):
+        average_after_buy(D("1"), D("100"), D("-1"), D("1"))
+
+
+def test_quantity_for_target_average() -> None:
+    # 10 adet × 7.000; 5.000'den kaç adetle ortalama 6.000 olur → 10
+    assert quantity_for_target_average(D("10"), D("70000"), D("5000"), D("6000")) == D("10")
+    assert quantity_for_target_average(D("10"), D("70000"), D("5000"), D("7500")) == 0  # zaten altında
+    assert quantity_for_target_average(D("10"), D("70000"), D("6500"), D("6000")) is None  # fiyat hedefin üstünde
+
+
+def test_required_change() -> None:
+    assert required_change(D("120"), D("100")) == D("20")
+    assert required_change(D("80"), D("100")) == D("-20")
+    assert required_change(None, D("100")) is None
+    assert required_change(D("80"), D("0")) is None

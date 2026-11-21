@@ -1,5 +1,16 @@
 # Değişiklik Günlüğü
 
+## [0.7.0] - 2026-11-21
+
+### Eklendi
+- Altın bazında getiri: her lot, kalem ve portföy için "aynı parayla alış günü gram altın alınsaydı" kıyası (Alım alım getiri sekmesi)
+- Başa baş fiyatları (Analiz > Başa baş): her varlık için nominal, enflasyona göre ve altına göre başa baş birim fiyatı ve bugünkü fiyattan gereken değişim
+- Ortalama maliyet hesaplayıcı (Aylık Plan): ek alımın yeni ortalamaya, nominal ve enflasyona göre başa baş noktasına etkisi; hedef ortalamaya inmek için gereken adet ve tutar
+- Kıyas sekmesinde bugüne kadar gerçekleşen toplam getiri (nominal, reel, dolar, altın) yıllık XIRR'dan ayrı gösterilir
+
+### Değişti
+- Yıllık getirinin (XIRR) kısa sürede toplam getiriden çok büyük görünebileceği açıklandı
+
 ## [0.6.0] - 2026-11-01
 
 ### Eklendi

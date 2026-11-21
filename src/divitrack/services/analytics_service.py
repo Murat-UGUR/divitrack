@@ -1,8 +1,10 @@
-"""Ek analizler: alım bazında getiri (nominal, reel, dolar bazında), aylık para akışı,
-para ağırlıklı yıllık getiri ve piyasa araçlarıyla kıyas, amaç bazlı senaryo, alım öncesi kontrol.
+"""Ek analizler: alım bazında getiri (nominal, reel, dolar ve altın bazında), başa baş fiyatları,
+ortalama maliyet hesabı, aylık para akışı, para ağırlıklı yıllık getiri ve piyasa araçlarıyla kıyas,
+amaç bazlı senaryo, alım öncesi kontrol.
 
 Bu servis veri yazmaz (kıyas listesi hariç); işlem defteri, fiyatlar, kurlar ve TÜFE'yi yorumlar.
-Tüm tutarlar TL'dir; dolar bazında getiri için işlem günü ve bugünkü USD/TRY kuru kullanılır.
+Tüm tutarlar TL'dir; dolar bazında getiri için işlem günü ve bugünkü USD/TRY kuru, altın bazında
+getiri için işlem günü ve bugünkü gram altın fiyatı kullanılır.
 """
 
 from __future__ import annotations
@@ -20,7 +22,15 @@ from divitrack.core.exceptions import ValidationError
 from divitrack.core.inflation import cpi_at, inflation_factor, latest_month, month_key
 from divitrack.core.money import HUNDRED, ONE, ZERO, pct
 from divitrack.core.planning import apply_shocks
-from divitrack.core.returns import open_lots, real_rate, xirr
+from divitrack.core.returns import (
+    AverageChange,
+    average_after_buy,
+    open_lots,
+    quantity_for_target_average,
+    real_rate,
+    required_change,
+    xirr,
+)
 from divitrack.repositories.sqlite import CpiRepository, SettingsRepository, TransactionRepository
 from divitrack.services.budget_service import add_months, month_start
 from divitrack.services.insights_service import InsightsService, PlanRules
@@ -45,6 +55,8 @@ class LotRow:
     value: Decimal | None  # güncel değer (TL)
     value_usd: Decimal | None
     approx_fx: bool
+    cost_gold: Decimal | None = None  # maliyetle alış günü alınabilecek gram altın
+    value_gold: Decimal | None = None  # güncel değerin bugünkü gram altın karşılığı
 
     @property
     def nominal_pct(self) -> Decimal | None:
@@ -61,6 +73,13 @@ class LotRow:
         if self.value_usd is None or self.cost_usd is None or self.cost_usd <= 0:
             return None
         return pct(self.value_usd - self.cost_usd, self.cost_usd)
+
+    @property
+    def gold_pct(self) -> Decimal | None:
+        """Aynı parayla o gün gram altın alınsaydı ona göre getiri (%)."""
+        if self.value_gold is None or self.cost_gold is None or self.cost_gold <= 0:
+            return None
+        return pct(self.value_gold - self.cost_gold, self.cost_gold)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +92,8 @@ class AssetReturn:
     cost_usd: Decimal | None
     value: Decimal | None
     value_usd: Decimal | None
+    cost_gold: Decimal | None = None
+    value_gold: Decimal | None = None
 
     @property
     def nominal_pct(self) -> Decimal | None:
@@ -90,6 +111,13 @@ class AssetReturn:
             return None
         return pct(self.value_usd - self.cost_usd, self.cost_usd)
 
+    @property
+    def gold_pct(self) -> Decimal | None:
+        """Aynı parayla o gün gram altın alınsaydı ona göre getiri (%)."""
+        if self.value_gold is None or self.cost_gold is None or self.cost_gold <= 0:
+            return None
+        return pct(self.value_gold - self.cost_gold, self.cost_gold)
+
 
 @dataclass(slots=True)
 class LotReport:
@@ -97,6 +125,7 @@ class LotReport:
     cpi_month: str | None
     usd_rate: Decimal | None  # bugünkü USD/TRY
     unpriced: list[str] = field(default_factory=list)
+    gold_price: Decimal | None = None  # bugünkü gram altın (TL)
 
     def by_asset(self) -> list[AssetReturn]:
         groups: dict[int, list[LotRow]] = defaultdict(list)
@@ -112,6 +141,8 @@ class LotReport:
                     _sum_or_none([r.cost_usd for r in rows]),
                     _sum_or_none([r.value for r in rows]),
                     _sum_or_none([r.value_usd for r in rows]),
+                    _sum_or_none([r.cost_gold for r in rows]),
+                    _sum_or_none([r.value_gold for r in rows]),
                 )
             )
         return sorted(out, key=lambda r: -(r.value or ZERO))
@@ -126,6 +157,8 @@ class LotReport:
             _sum_or_none([r.cost_usd for r in self.lots]),
             _sum_or_none([r.value for r in self.lots]),
             _sum_or_none([r.value_usd for r in self.lots]),
+            _sum_or_none([r.cost_gold for r in self.lots]),
+            _sum_or_none([r.value_gold for r in self.lots]),
         )
 
 
@@ -268,6 +301,51 @@ class PurchaseCheck:
         return "Uygun"
 
 
+@dataclass(frozen=True, slots=True)
+class BreakEvenRow:
+    """Bir varlığın zararı kapatması için gereken birim fiyatlar (TL) ve bugünkü fiyattan uzaklığı."""
+
+    asset: Asset
+    quantity: Decimal
+    price: Decimal | None  # bugünkü birim fiyat (TL)
+    nominal: Decimal  # ortalama maliyet
+    real: Decimal | None  # TÜFE ile bugüne taşınmış maliyet / adet
+    gold: Decimal | None  # aynı parayla alınabilecek altının bugünkü değeri / adet
+
+    @property
+    def nominal_gap_pct(self) -> Decimal | None:
+        return required_change(self.nominal, self.price)
+
+    @property
+    def real_gap_pct(self) -> Decimal | None:
+        return required_change(self.real, self.price)
+
+    @property
+    def gold_gap_pct(self) -> Decimal | None:
+        return required_change(self.gold, self.price)
+
+
+@dataclass(frozen=True, slots=True)
+class AverageCostResult:
+    """Ortalama maliyet hesaplayıcısının sonucu (TL)."""
+
+    asset: Asset
+    change: AverageChange
+    price_now: Decimal | None
+    real_before: Decimal | None  # enflasyona göre başa baş (birim)
+    real_after: Decimal | None
+    target: Decimal | None = None
+    target_quantity: Decimal | None = None  # hedefe inmek için gereken adet (None: inilemez)
+
+    @property
+    def gap_before_pct(self) -> Decimal | None:
+        return required_change(self.change.average_before, self.price_now)
+
+    @property
+    def gap_after_pct(self) -> Decimal | None:
+        return required_change(self.change.average_after, self.price_now)
+
+
 def _sum_or_none(values: list[Decimal | None]) -> Decimal | None:
     if not values or any(v is None for v in values):
         return None
@@ -324,6 +402,8 @@ class AnalyticsService:
         start = min((t.trade_date for t in all_txs), default=self.today())
         hist, current = self._fx_tables({pv.asset.currency for pv in summary.open_positions}, start)
         usd_now = current.get(Currency.USD)
+        gold_hist = self.market.gold_gram_history(start - timedelta(days=7))
+        gold_now = self.market.gold_gram_price()
 
         rows: list[LotRow] = []
         unpriced: list[str] = []
@@ -343,6 +423,7 @@ class AnalyticsService:
                 usd_then, approx_usd = self._rate(Currency.USD, t.trade_date, hist, current)
                 factor = inflation_factor(index, t.trade_date) if index else None
                 value = lot.quantity * price_try if price_try is not None else None
+                gold_then = value_on(gold_hist, t.trade_date)
                 rows.append(
                     LotRow(
                         asset=pv.asset,
@@ -355,10 +436,81 @@ class AnalyticsService:
                         value=value,
                         value_usd=value / usd_now if value is not None and usd_now else None,
                         approx_fx=approx or approx_usd,
+                        cost_gold=cost / gold_then if gold_then else None,
+                        value_gold=value / gold_now if value is not None and gold_now else None,
                     )
                 )
         rows.sort(key=lambda r: (r.trade_date, r.asset.symbol))
-        return LotReport(rows, latest_month(index), usd_now, unpriced)
+        return LotReport(rows, latest_month(index), usd_now, unpriced, gold_now)
+
+    # ------------------------------------------------------------------ başa baş ve ortalama
+    def break_even(self, report: LotReport | None = None) -> list[BreakEvenRow]:
+        """Varlık başına nominal, enflasyona göre ve altına göre başa baş birim fiyatı."""
+        report = report or self.lots()
+        groups: dict[int, list[LotRow]] = defaultdict(list)
+        for lot in report.lots:
+            groups[lot.asset.id or -1].append(lot)
+        rows: list[BreakEvenRow] = []
+        for lots in groups.values():
+            qty = sum((r.quantity for r in lots), ZERO)
+            if qty <= 0:
+                continue
+            asset = lots[0].asset
+            cost = sum((r.cost for r in lots), ZERO)
+            value = _sum_or_none([r.value for r in lots])
+            cost_real = _sum_or_none([r.cost_real for r in lots])
+            cost_gold = _sum_or_none([r.cost_gold for r in lots])
+            gold = (
+                cost_gold * report.gold_price / qty
+                if cost_gold is not None and report.gold_price is not None and not _is_gram_gold(asset)
+                else None
+            )
+            rows.append(
+                BreakEvenRow(
+                    asset=asset,
+                    quantity=qty,
+                    price=value / qty if value is not None else None,
+                    nominal=cost / qty,
+                    real=cost_real / qty if cost_real is not None else None,
+                    gold=gold,
+                )
+            )
+        return sorted(rows, key=lambda r: -(r.price or ZERO) * r.quantity)
+
+    def average_cost(
+        self,
+        asset: Asset,
+        add_quantity: Decimal,
+        price: Decimal,
+        target: Decimal | None = None,
+        report: LotReport | None = None,
+    ) -> AverageCostResult:
+        """`asset`e `add_quantity` adet `price` (TL) fiyattan eklenirse ortalama ve başa baş ne olur."""
+        if add_quantity < 0 or price < 0:
+            raise ValidationError("Adet ve fiyat negatif olamaz.")
+        report = report or self.lots()
+        lots = [r for r in report.lots if r.asset.id == asset.id]
+        qty = sum((r.quantity for r in lots), ZERO)
+        if qty <= 0:
+            raise ValidationError(f"{asset.symbol} için elde kalan alım yok.")
+        cost = sum((r.cost for r in lots), ZERO)
+        change = average_after_buy(qty, cost, add_quantity, price)
+        cost_real = _sum_or_none([r.cost_real for r in lots])
+        value = _sum_or_none([r.value for r in lots])
+        target_qty = None
+        if target is not None:
+            if target <= 0:
+                raise ValidationError("Hedef ortalama sıfırdan büyük olmalı.")
+            target_qty = quantity_for_target_average(qty, cost, price, target)
+        return AverageCostResult(
+            asset=asset,
+            change=change,
+            price_now=value / qty if value is not None else None,
+            real_before=cost_real / qty if cost_real is not None else None,
+            real_after=(cost_real + change.purchase_amount) / change.quantity_after if cost_real is not None else None,
+            target=target,
+            target_quantity=target_qty,
+        )
 
     # ------------------------------------------------------------------ para akışı
     def contributions(self) -> list[ContributionRow]:
@@ -589,6 +741,10 @@ class AnalyticsService:
                 )
             )
         return PurchaseCheck(asset, amount, w_before, w_after, p_before, p_after, items)
+
+
+def _is_gram_gold(asset: Asset) -> bool:
+    return asset.asset_class is AssetClass.PRECIOUS_METAL and asset.symbol == "XAU-GRAM"
 
 
 def price_freshness(quote, today: date | None = None, *, max_age_days: int = 3) -> str:  # type: ignore[no-untyped-def]

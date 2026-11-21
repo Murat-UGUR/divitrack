@@ -13,6 +13,7 @@ from divitrack.core.enums import AssetClass, Currency
 from divitrack.core.inflation import monthly_changes
 from divitrack.services.analytics_service import (
     BenchmarkRow,
+    BreakEvenRow,
     ContributionRow,
     LotReport,
     ScenarioRow,
@@ -346,6 +347,7 @@ def lots_frame(report: LotReport) -> pd.DataFrame:
                 "Enflasyonla alış (TL)": _f(lot.cost_real),
                 "Reel %": _f(lot.real_pct),
                 "Dolar bazında %": _f(lot.usd_pct),
+                "Altın bazında %": _f(lot.gold_pct),
                 "Kur": "≈ güncel" if lot.approx_fx else "",
             }
             for lot in report.lots
@@ -361,6 +363,7 @@ def lots_frame(report: LotReport) -> pd.DataFrame:
             "Enflasyonla alış (TL)",
             "Reel %",
             "Dolar bazında %",
+            "Altın bazında %",
             "Kur",
         ],
     )
@@ -377,10 +380,48 @@ def asset_returns_frame(report: LotReport) -> pd.DataFrame:
                 "Nominal %": _f(r.nominal_pct),
                 "Reel %": _f(r.real_pct),
                 "Dolar bazında %": _f(r.usd_pct),
+                "Altın bazında %": _f(r.gold_pct),
             }
             for r in report.by_asset()
         ],
-        columns=["Sembol", "Amaç", "Maliyet (TL)", "Değer (TL)", "Nominal %", "Reel %", "Dolar bazında %"],
+        columns=[
+            "Sembol",
+            "Amaç",
+            "Maliyet (TL)",
+            "Değer (TL)",
+            "Nominal %",
+            "Reel %",
+            "Dolar bazında %",
+            "Altın bazında %",
+        ],
+    )
+
+
+def break_even_frame(rows: Sequence[BreakEvenRow]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Sembol": r.asset.symbol,
+                "Fiyat": _f(r.price),
+                "Nominal başa baş": _f(r.nominal),
+                "Nominal fark %": _f(r.nominal_gap_pct),
+                "Enflasyona göre": _f(r.real),
+                "Enflasyon fark %": _f(r.real_gap_pct),
+                "Altına göre": _f(r.gold),
+                "Altın fark %": _f(r.gold_gap_pct),
+            }
+            for r in rows
+        ],
+        columns=[
+            "Sembol",
+            "Fiyat",
+            "Nominal başa baş",
+            "Nominal fark %",
+            "Enflasyona göre",
+            "Enflasyon fark %",
+            "Altına göre",
+            "Altın fark %",
+        ],
     )
 
 

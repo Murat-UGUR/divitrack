@@ -96,3 +96,52 @@ def xirr(flows: Sequence[tuple[date, Decimal]], *, tol: float = 1e-7, max_iter: 
 def real_rate(nominal: Decimal, inflation: Decimal) -> Decimal:
     """Nominal getiri ve enflasyondan reel getiri (oranlar, ör. 0.40 ve 0.30 → 0.0769)."""
     return (ONE + nominal) / (ONE + inflation) - ONE
+
+
+# --------------------------------------------------------------------------- ortalama maliyet
+@dataclass(frozen=True, slots=True)
+class AverageChange:
+    """Bir ek alımın ortalama maliyete etkisi (tutarlar aynı para biriminde)."""
+
+    quantity_before: Decimal
+    quantity_after: Decimal
+    average_before: Decimal
+    average_after: Decimal
+    purchase_amount: Decimal
+
+    @property
+    def change_pct(self) -> Decimal:
+        """Ortalamadaki değişim (%); eksi = ortalama düştü."""
+        return (self.average_after / self.average_before - ONE) * Decimal(100)
+
+
+def average_after_buy(quantity: Decimal, cost: Decimal, add_quantity: Decimal, price: Decimal) -> AverageChange:
+    """Eldeki `quantity` adet (toplam maliyet `cost`) üstüne `add_quantity` adet `price`tan alınırsa."""
+    if quantity <= 0 or cost < 0:
+        raise ValueError("Eldeki adet sıfırdan büyük, maliyet negatif olmayan bir sayı olmalı")
+    if add_quantity < 0 or price < 0:
+        raise ValueError("Eklenecek adet ve fiyat negatif olamaz")
+    total_qty = quantity + add_quantity
+    amount = add_quantity * price
+    return AverageChange(quantity, total_qty, cost / quantity, (cost + amount) / total_qty, amount)
+
+
+def quantity_for_target_average(quantity: Decimal, cost: Decimal, price: Decimal, target: Decimal) -> Decimal | None:
+    """Ortalamayı `target`a indirmek için `price`tan kaç adet alınmalı.
+
+    Zaten hedefin altındaysa 0; fiyat hedefe eşit ya da üstündeyse hedefe inilemez → None.
+    """
+    if quantity <= 0 or target <= 0:
+        raise ValueError("Adet ve hedef ortalama sıfırdan büyük olmalı")
+    if cost / quantity <= target:
+        return ZERO
+    if price >= target:
+        return None
+    return (cost - target * quantity) / (target - price)
+
+
+def required_change(break_even: Decimal | None, price: Decimal | None) -> Decimal | None:
+    """Fiyatın başa baş noktasına gelmesi için gereken değişim (%). Eksi/sıfır = çoktan geçildi."""
+    if break_even is None or price is None or price <= 0:
+        return None
+    return (break_even / price - ONE) * Decimal(100)

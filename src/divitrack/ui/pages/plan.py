@@ -1,4 +1,5 @@
-"""Aylık Plan: bütçeden kalan parayı amaçlara bölme, alım öncesi kontrol, birikim hedefleri ve aylık rutin."""
+"""Aylık Plan: bütçeden kalan parayı amaçlara bölme, alım öncesi kontrol, ortalama maliyet hesaplayıcı,
+birikim hedefleri ve aylık rutin."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from divitrack.core.exceptions import DivitrackError
 from divitrack.core.money import HUNDRED, ZERO, to_decimal
 from divitrack.services.budget_service import add_months, month_start
 from divitrack.ui.components.widgets import sidebar
-from divitrack.ui.formatting import fmt_money
+from divitrack.ui.formatting import fmt_money, fmt_pct, fmt_qty
 from divitrack.ui.pages.budget import month_label
 from divitrack.ui.state import get_container, run_action, show_flashes
 from divitrack.ui.tables import plan_frame
@@ -99,6 +100,7 @@ def render() -> None:
         st.info("Öneriyi görmek için yatırılacak tutarı gir.")
 
     _purchase_check(c, base, summary, rules)
+    _average_cost(c)
     _goals()
 
     st.subheader("Aylık rutin")
@@ -139,6 +141,85 @@ def _purchase_check(c, base, summary, rules) -> None:  # type: ignore[no-untyped
         )
         for item in check.items:
             st.markdown(f"{CHECK_ICON.get(item.level, '•')} {item.text}")
+
+
+def _average_cost(c) -> None:  # type: ignore[no-untyped-def]
+    st.subheader("Ortalama maliyet hesaplayıcı")
+    st.caption(
+        "Bir varlığa ekleme yaparsan ortalaman, nominal ve enflasyona göre başa baş noktan ne olur? "
+        "İstersen hedef bir ortalama gir; o ortalamaya inmek için kaç adet alman gerektiğini gösterir. "
+        "Tutarlar TL'dir, hiçbir şey kaydedilmez."
+    )
+    report = c.analytics.lots()
+    held = {lot.asset.id: lot.asset for lot in report.lots}
+    if not held:
+        st.info("Hesap için elde kalan bir alım gerekiyor.")
+        return
+    assets = list(held.values())
+    default = next((i for i, a in enumerate(assets) if a.symbol == "XAU-GRAM"), 0)
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    asset = col1.selectbox("Varlık", assets, index=default, format_func=lambda a: a.display_name, key="avg_asset")
+    if asset is None:
+        return
+    lots = [lot for lot in report.lots if lot.asset.id == asset.id]
+    qty_now = sum((lot.quantity for lot in lots), ZERO)
+    value_now = sum((lot.value for lot in lots if lot.value is not None), ZERO)
+    price_now = value_now / qty_now if qty_now and all(lot.value is not None for lot in lots) else None
+    raw_qty = col2.text_input("Eklenecek adet", value="10", key="avg_qty")
+    raw_price = col3.text_input(
+        "Alış fiyatı (TL)",
+        value=format(price_now.quantize(Decimal("0.0001")).normalize(), "f") if price_now else "",
+        key=f"avg_price_{asset.id}",
+    )
+    raw_target = col4.text_input("Hedef ortalama", placeholder="isteğe bağlı", key="avg_target")
+    if not raw_qty.strip() or not raw_price.strip():
+        return
+    try:
+        price = to_decimal(raw_price, field="Fiyat")
+        res = c.analytics.average_cost(
+            asset,
+            to_decimal(raw_qty, field="Adet"),
+            price,
+            to_decimal(raw_target, field="Hedef ortalama") if raw_target.strip() else None,
+            report=report,
+        )
+    except DivitrackError as exc:
+        st.error(str(exc))
+        return
+    ch = res.change
+    with st.container(border=True):
+        m1, m2, m3 = st.columns(3)
+        m1.metric(
+            "Ortalama maliyet",
+            fmt_money(ch.average_after, Currency.TRY),
+            delta=f"%{ch.change_pct:+.1f}".replace(".", ","),
+            delta_color="inverse",
+            help=f"Şu an {fmt_money(ch.average_before, Currency.TRY)}",
+        )
+        m2.metric(
+            "Başa baş için gereken",
+            fmt_pct(res.gap_after_pct, 1, signed=True),
+            help=f"Şu an {fmt_pct(res.gap_before_pct, 1, signed=True)} (bugünkü fiyattan)",
+        )
+        m3.metric(
+            "Enflasyona göre başa baş",
+            fmt_money(res.real_after, Currency.TRY),
+            help=f"Şu an {fmt_money(res.real_before, Currency.TRY)}" if res.real_before is not None else "TÜFE yok",
+        )
+        st.caption(
+            f"Adet {fmt_qty(ch.quantity_before)} → {fmt_qty(ch.quantity_after)} · "
+            f"alım tutarı {fmt_money(ch.purchase_amount, Currency.TRY)}"
+        )
+        if res.target is not None:
+            if res.target_quantity is None:
+                st.markdown(f"🟠 {fmt_money(res.target, Currency.TRY)} ortalamaya bu fiyattan alarak inilemez.")
+            elif res.target_quantity == 0:
+                st.markdown("✅ Ortalaman zaten hedefin altında.")
+            else:
+                st.markdown(
+                    f"🎯 Hedefe inmek için **{fmt_qty(res.target_quantity)}** adet · "
+                    f"yaklaşık {fmt_money(res.target_quantity * price, Currency.TRY)}"
+                )
 
 
 STATUS_ICON = {"Ulaşıldı": "✅", "Yolunda": "🟢", "Geride": "🟠", "Süre doldu": "🔴", "Tasarruf verisi yok": "⚪"}
