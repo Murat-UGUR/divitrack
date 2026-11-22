@@ -3,15 +3,64 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 
 from divitrack.core.calculations import compute_position
-from divitrack.core.entities import Snapshot
+from divitrack.core.entities import Asset, AssetSnapshot, Snapshot
 from divitrack.core.enums import Currency
 from divitrack.core.money import ZERO
-from divitrack.repositories.sqlite import SnapshotRepository
+from divitrack.repositories.sqlite import AssetSnapshotRepository, SnapshotRepository
 from divitrack.services.market.market_data_service import value_on
 from divitrack.services.portfolio_service import PortfolioService, PortfolioSummary
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeRow:
+    """İki kayıt arasında bir varlığın değer farkı ve kaynağı (raporlama para biriminde)."""
+
+    asset: Asset
+    value_before: Decimal
+    value_after: Decimal
+    price_before: Decimal | None
+    price_after: Decimal | None
+    price_effect: Decimal  # eski adet × fiyat farkı
+    flow_effect: Decimal  # yeni alım / satış / temettüden gelen adet değişimi
+    cost_added: Decimal  # bu sürede eklenen (eksi: çıkan) maliyet
+
+    @property
+    def change(self) -> Decimal:
+        return self.value_after - self.value_before
+
+    @property
+    def price_change_pct(self) -> Decimal | None:
+        if not self.price_before or self.price_after is None:
+            return None
+        return (self.price_after / self.price_before - 1) * 100
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeReport:
+    since: date
+    until: date
+    rows: list[ChangeRow]
+
+    @property
+    def total_change(self) -> Decimal:
+        return sum((r.change for r in self.rows), ZERO)
+
+    @property
+    def price_effect(self) -> Decimal:
+        return sum((r.price_effect for r in self.rows), ZERO)
+
+    @property
+    def flow_effect(self) -> Decimal:
+        return sum((r.flow_effect for r in self.rows), ZERO)
+
+    @property
+    def cost_added(self) -> Decimal:
+        return sum((r.cost_added for r in self.rows), ZERO)
 
 
 class SnapshotService:
@@ -20,18 +69,79 @@ class SnapshotService:
         snapshots: SnapshotRepository,
         portfolio: PortfolioService,
         today: Callable[[], date] = date.today,
+        asset_snapshots: AssetSnapshotRepository | None = None,
     ) -> None:
         self.snapshots = snapshots
         self.portfolio = portfolio
         self.today = today
+        self.asset_snapshots = asset_snapshots
 
     def record(self, summary: PortfolioSummary) -> Snapshot | None:
-        """Bugünün değerini kaydeder (aynı gün tekrar çağrılırsa günceller)."""
+        """Bugünün değerini (toplam ve varlık bazında) kaydeder; aynı gün tekrar çağrılırsa günceller."""
         if summary.total_value == 0 and summary.total_cost == 0:
             return None
-        snap = Snapshot(self.today(), summary.total_value, summary.total_cost, summary.base_currency)
+        day = self.today()
+        snap = Snapshot(day, summary.total_value, summary.total_cost, summary.base_currency)
         self.snapshots.upsert(snap)
+        if self.asset_snapshots is not None:
+            rows = []
+            for pv in summary.open_positions:
+                value, cost = pv.market_value_base, pv.cost_basis_base
+                if value is None or cost is None or pv.asset.id is None or not pv.state.quantity:
+                    continue
+                rows.append(
+                    AssetSnapshot(
+                        day,
+                        pv.asset.id,
+                        pv.state.quantity,
+                        value / pv.state.quantity,
+                        value,
+                        cost,
+                        summary.base_currency,
+                    )
+                )
+            self.asset_snapshots.replace_day(day, summary.base_currency, rows)
         return snap
+
+    # ------------------------------------------------------------------ ne değişti?
+    def snapshot_dates(self, currency: Currency) -> list[date]:
+        return self.asset_snapshots.dates(currency) if self.asset_snapshots is not None else []
+
+    def changes(self, currency: Currency, since: date, until: date | None = None) -> ChangeReport | None:
+        """`since` kaydından `until` (varsayılan: en son) kaydına varlık bazında değişim."""
+        if self.asset_snapshots is None:
+            return None
+        dates = self.asset_snapshots.dates(currency)
+        if not dates:
+            return None
+        until = until or dates[-1]
+        before = {r.asset_id: r for r in self.asset_snapshots.on(since, currency)}
+        after = {r.asset_id: r for r in self.asset_snapshots.on(until, currency)}
+        if not before and not after:
+            return None
+        assets = {a.id: a for a in self.portfolio.assets.list()}
+        rows: list[ChangeRow] = []
+        for aid in before.keys() | after.keys():
+            asset = assets.get(aid)
+            if asset is None:
+                continue
+            b, a = before.get(aid), after.get(aid)
+            vb, va = (b.value if b else ZERO), (a.value if a else ZERO)
+            price_effect = b.quantity * (a.price - b.price) if a and b else ZERO
+            rows.append(
+                ChangeRow(
+                    asset,
+                    vb,
+                    va,
+                    b.price if b else None,
+                    a.price if a else None,
+                    price_effect,
+                    va - vb - price_effect,
+                    (a.cost if a else ZERO) - (b.cost if b else ZERO),
+                )
+            )
+        rows.sort(key=lambda r: r.change)
+        return ChangeReport(since, until, rows)
 
     def history(self, currency: Currency) -> list[Snapshot]:
         return self.snapshots.list(currency)

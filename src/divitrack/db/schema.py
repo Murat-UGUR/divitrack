@@ -201,6 +201,37 @@ MIGRATIONS: list[str] = [
         goal_id  INTEGER NOT NULL REFERENCES goals(id) ON DELETE CASCADE
     );
     """,
+    # --- v5: mevduat faizi, varlık bazında anlık kayıt, Yİ-ÜFE, alarmlar ---------
+    """
+    -- Nakit/mevduat için yıllık net faiz (%); boşsa faiz işlemez
+    ALTER TABLE assets ADD COLUMN annual_rate TEXT;
+    -- Günlük varlık bazında değer ("Ne değişti?")
+    CREATE TABLE asset_snapshots (
+        snapshot_date TEXT    NOT NULL,
+        asset_id      INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        currency      TEXT    NOT NULL CHECK (currency IN ('TRY','USD','EUR')),
+        quantity      TEXT    NOT NULL,
+        price         TEXT    NOT NULL,
+        value         TEXT    NOT NULL,
+        cost          TEXT    NOT NULL,
+        PRIMARY KEY (snapshot_date, asset_id, currency)
+    );
+    -- Yİ-ÜFE endeksi: yurt dışı hisse satış kazancında maliyet endekslemesi
+    CREATE TABLE ppi_monthly (
+        month TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    CREATE TABLE alerts (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind           TEXT    NOT NULL
+                       CHECK (kind IN ('PRICE_BELOW','PRICE_ABOVE','WEIGHT_ABOVE','DRAWDOWN')),
+        asset_id       INTEGER REFERENCES assets(id) ON DELETE CASCADE,
+        threshold      TEXT    NOT NULL,
+        note           TEXT    NOT NULL DEFAULT '',
+        active         INTEGER NOT NULL DEFAULT 1,
+        last_triggered TEXT
+    );
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -218,5 +249,8 @@ DATA_TABLES = (
     "category_rules",
     "score_history",
     "goals",
+    "asset_snapshots",
+    "ppi_monthly",
+    "alerts",
     "goal_assets",
 )

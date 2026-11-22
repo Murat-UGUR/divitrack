@@ -125,3 +125,30 @@ class DividendStatus(StrEnum):
     @property
     def label(self) -> str:
         return "Beklenen" if self is DividendStatus.EXPECTED else "Ödendi"
+
+
+class AlertKind(StrEnum):
+    PRICE_BELOW = "PRICE_BELOW"
+    PRICE_ABOVE = "PRICE_ABOVE"
+    WEIGHT_ABOVE = "WEIGHT_ABOVE"
+    DRAWDOWN = "DRAWDOWN"
+
+    @property
+    def label(self) -> str:
+        return _ALERT_LABELS[self]
+
+    @property
+    def needs_asset(self) -> bool:
+        return self is not AlertKind.DRAWDOWN
+
+    @property
+    def unit(self) -> str:
+        return "%" if self in (AlertKind.WEIGHT_ABOVE, AlertKind.DRAWDOWN) else "TL"
+
+
+_ALERT_LABELS = {
+    AlertKind.PRICE_BELOW: "Fiyat altına inerse",
+    AlertKind.PRICE_ABOVE: "Fiyat üstüne çıkarsa",
+    AlertKind.WEIGHT_ABOVE: "Portföydeki payı aşarsa",
+    AlertKind.DRAWDOWN: "Portföy zirveden düşerse",
+}

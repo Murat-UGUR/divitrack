@@ -10,13 +10,16 @@ from divitrack.core.enums import Currency
 from divitrack.core.ports import PriceProvider
 from divitrack.db.database import Database
 from divitrack.repositories.sqlite import (
+    AlertRepository,
     AssetRepository,
+    AssetSnapshotRepository,
     CashFlowRepository,
     CategoryRepository,
     CategoryRuleRepository,
     CpiRepository,
     DividendRepository,
     GoalRepository,
+    PpiRepository,
     PriceCacheRepository,
     ScoreHistoryRepository,
     SettingsRepository,
@@ -31,8 +34,11 @@ from divitrack.services.goal_service import GoalService
 from divitrack.services.insights_service import InsightsService
 from divitrack.services.io.transfer import DataTransferService
 from divitrack.services.market.market_data_service import MarketDataService
+from divitrack.services.plan_service import PlanService
 from divitrack.services.portfolio_service import PortfolioService
+from divitrack.services.risk_service import RiskService
 from divitrack.services.snapshot_service import SnapshotService
+from divitrack.services.tax_service import TaxService
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +61,10 @@ class Container:
     inflation: CpiService
     goals: GoalService
     analytics: AnalyticsService
+    risk: RiskService
+    tax: TaxService
+    plans: PlanService
+    ppi: PpiRepository
 
     @property
     def base_currency(self) -> Currency:
@@ -107,14 +117,15 @@ def build_container(
     portfolio = PortfolioService(assets, txs, market)
     budget = BudgetService(categories, flows, settings_repo, CategoryRuleRepository(db))
     insights = InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db))
+    dividends = DividendEngine(divs, settings_repo, provider)
     container = Container(
         settings=settings,
         db=db,
         settings_repo=settings_repo,
         market=market,
         portfolio=portfolio,
-        dividends=DividendEngine(divs, settings_repo, provider),
-        snapshots=SnapshotService(snaps, portfolio),
+        dividends=dividends,
+        snapshots=SnapshotService(snaps, portfolio, asset_snapshots=AssetSnapshotRepository(db)),
         transfer=DataTransferService(
             db,
             assets,
@@ -127,6 +138,8 @@ def build_container(
             cpi,
             CategoryRuleRepository(db),
             GoalRepository(db),
+            PpiRepository(db),
+            AlertRepository(db),
         ),
         budget=budget,
         insights=insights,
@@ -134,6 +147,10 @@ def build_container(
         inflation=CpiService(cpi, settings_repo),
         goals=GoalService(GoalRepository(db), portfolio, budget),
         analytics=AnalyticsService(portfolio, txs, cpi, market, settings_repo, insights),
+        risk=RiskService(snaps, portfolio),
+        tax=TaxService(portfolio, PpiRepository(db), settings_repo),
+        plans=PlanService(portfolio, dividends, settings_repo),
+        ppi=PpiRepository(db),
     )
     container.insights.goals = container.goals
     return container

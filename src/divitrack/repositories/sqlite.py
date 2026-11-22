@@ -9,7 +9,9 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from divitrack.core.entities import (
+    Alert,
     Asset,
+    AssetSnapshot,
     CashFlow,
     Category,
     Dividend,
@@ -18,7 +20,7 @@ from divitrack.core.entities import (
     Snapshot,
     Transaction,
 )
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
+from divitrack.core.enums import AlertKind, AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import DuplicateError, NotFoundError, ValidationError
 from divitrack.db.database import Database
 
@@ -52,13 +54,15 @@ class AssetRepository(_Repo):
             currency=Currency(r["currency"]),
             manual_price=_dec(r["manual_price"]),
             purpose=Purpose(r["purpose"]),
+            annual_rate=_dec(r["annual_rate"]),
         )
 
     def add(self, asset: Asset) -> Asset:
         try:
             with self.db.transaction() as c:
                 cur = c.execute(
-                    "INSERT INTO assets(symbol,name,asset_class,currency,manual_price,purpose) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO assets(symbol,name,asset_class,currency,manual_price,purpose,annual_rate) "
+                    "VALUES (?,?,?,?,?,?,?)",
                     (
                         asset.symbol,
                         asset.name,
@@ -66,6 +70,7 @@ class AssetRepository(_Repo):
                         asset.currency.value,
                         _s(asset.manual_price),
                         asset.purpose.value,
+                        _s(asset.annual_rate),
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -76,7 +81,8 @@ class AssetRepository(_Repo):
     def update(self, asset: Asset) -> Asset:
         with self.db.transaction() as c:
             cur = c.execute(
-                "UPDATE assets SET symbol=?, name=?, asset_class=?, currency=?, manual_price=?, purpose=? WHERE id=?",
+                "UPDATE assets SET symbol=?, name=?, asset_class=?, currency=?, manual_price=?, purpose=?, "
+                "annual_rate=? WHERE id=?",
                 (
                     asset.symbol,
                     asset.name,
@@ -84,6 +90,7 @@ class AssetRepository(_Repo):
                     asset.currency.value,
                     _s(asset.manual_price),
                     asset.purpose.value,
+                    _s(asset.annual_rate),
                     asset.id,
                 ),
             )
@@ -428,25 +435,149 @@ class CashFlowRepository(_Repo):
 
 
 class CpiRepository(_Repo):
+    """Aylık endeks tablosu (varsayılan TÜFE; `PpiRepository` aynı yapıda Yİ-ÜFE)."""
+
+    TABLE = "cpi_monthly"
+
     def all(self) -> dict[str, Decimal]:
         with self.db.transaction() as c:
-            return {r["month"]: Decimal(r["value"]) for r in c.execute("SELECT month, value FROM cpi_monthly")}
+            return {r["month"]: Decimal(r["value"]) for r in c.execute(f"SELECT month, value FROM {self.TABLE}")}
 
     def replace_all(self, index: dict[str, Decimal]) -> None:
         with self.db.transaction() as c:
-            c.execute("DELETE FROM cpi_monthly")
+            c.execute(f"DELETE FROM {self.TABLE}")
             c.executemany(
-                "INSERT INTO cpi_monthly(month, value) VALUES (?, ?)",
+                f"INSERT INTO {self.TABLE}(month, value) VALUES (?, ?)",
                 [(m, _s(v)) for m, v in sorted(index.items())],
             )
 
     def upsert(self, month: str, value: Decimal) -> None:
         with self.db.transaction() as c:
             c.execute(
-                "INSERT INTO cpi_monthly(month, value) VALUES (?, ?) "
+                f"INSERT INTO {self.TABLE}(month, value) VALUES (?, ?) "
                 "ON CONFLICT(month) DO UPDATE SET value=excluded.value",
                 (month, _s(value)),
             )
+
+
+class PpiRepository(CpiRepository):
+    TABLE = "ppi_monthly"
+
+
+# --------------------------------------------------------------------------- varlık anlık kayıtları
+class AssetSnapshotRepository(_Repo):
+    def replace_day(self, day: date, currency: Currency, rows: Sequence[AssetSnapshot]) -> None:
+        """O günün kayıtlarını yeniler (gün içinde satılan varlık eski kayıtta kalmasın)."""
+        with self.db.transaction() as c:
+            c.execute(
+                "DELETE FROM asset_snapshots WHERE snapshot_date=? AND currency=?", (day.isoformat(), currency.value)
+            )
+            c.executemany(
+                "INSERT INTO asset_snapshots(snapshot_date,asset_id,currency,quantity,price,value,cost) "
+                "VALUES (?,?,?,?,?,?,?)",
+                [
+                    (
+                        r.snapshot_date.isoformat(),
+                        r.asset_id,
+                        r.currency.value,
+                        _s(r.quantity),
+                        _s(r.price),
+                        _s(r.value),
+                        _s(r.cost),
+                    )
+                    for r in rows
+                ],
+            )
+
+    def dates(self, currency: Currency) -> list[date]:
+        with self.db.transaction() as c:
+            rows = c.execute(
+                "SELECT DISTINCT snapshot_date FROM asset_snapshots WHERE currency=? ORDER BY snapshot_date",
+                (currency.value,),
+            ).fetchall()
+        return [date.fromisoformat(r[0]) for r in rows]
+
+    def on(self, day: date, currency: Currency) -> list[AssetSnapshot]:
+        with self.db.transaction() as c:
+            rows = c.execute(
+                "SELECT * FROM asset_snapshots WHERE snapshot_date=? AND currency=?", (day.isoformat(), currency.value)
+            ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def list_all(self) -> list[AssetSnapshot]:
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT * FROM asset_snapshots ORDER BY snapshot_date, asset_id").fetchall()
+        return [self._row(r) for r in rows]
+
+    @staticmethod
+    def _row(r: sqlite3.Row) -> AssetSnapshot:
+        return AssetSnapshot(
+            date.fromisoformat(r["snapshot_date"]),
+            r["asset_id"],
+            Decimal(r["quantity"]),
+            Decimal(r["price"]),
+            Decimal(r["value"]),
+            Decimal(r["cost"]),
+            Currency(r["currency"]),
+        )
+
+
+# --------------------------------------------------------------------------- alarmlar
+class AlertRepository(_Repo):
+    @staticmethod
+    def _row(r: sqlite3.Row) -> Alert:
+        return Alert(
+            kind=AlertKind(r["kind"]),
+            threshold=Decimal(r["threshold"]),
+            asset_id=r["asset_id"],
+            note=r["note"],
+            active=bool(r["active"]),
+            last_triggered=_date(r["last_triggered"]),
+            id=r["id"],
+        )
+
+    def add(self, alert: Alert) -> Alert:
+        with self.db.transaction() as c:
+            cur = c.execute(
+                "INSERT INTO alerts(kind,asset_id,threshold,note,active,last_triggered) VALUES (?,?,?,?,?,?)",
+                (
+                    alert.kind.value,
+                    alert.asset_id,
+                    _s(alert.threshold),
+                    alert.note,
+                    int(alert.active),
+                    alert.last_triggered.isoformat() if alert.last_triggered else None,
+                ),
+            )
+        alert.id = cur.lastrowid
+        return alert
+
+    def update(self, alert: Alert) -> Alert:
+        with self.db.transaction() as c:
+            cur = c.execute(
+                "UPDATE alerts SET kind=?, asset_id=?, threshold=?, note=?, active=?, last_triggered=? WHERE id=?",
+                (
+                    alert.kind.value,
+                    alert.asset_id,
+                    _s(alert.threshold),
+                    alert.note,
+                    int(alert.active),
+                    alert.last_triggered.isoformat() if alert.last_triggered else None,
+                    alert.id,
+                ),
+            )
+        if cur.rowcount == 0:
+            raise NotFoundError(f"Alarm bulunamadı: {alert.id}")
+        return alert
+
+    def delete(self, alert_id: int) -> None:
+        with self.db.transaction() as c:
+            c.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+
+    def list(self) -> list[Alert]:
+        with self.db.transaction() as c:
+            rows = c.execute("SELECT * FROM alerts ORDER BY id").fetchall()
+        return [self._row(r) for r in rows]
 
 
 class CategoryRuleRepository(_Repo):

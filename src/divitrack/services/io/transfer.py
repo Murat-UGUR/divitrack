@@ -11,13 +11,14 @@ from decimal import Decimal
 from typing import Any
 
 from divitrack.core.calculations import compute_position
-from divitrack.core.entities import Asset, CashFlow, Category, Dividend, Goal, Snapshot, Transaction
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
+from divitrack.core.entities import Alert, Asset, CashFlow, Category, Dividend, Goal, Snapshot, Transaction
+from divitrack.core.enums import AlertKind, AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import DivitrackError, ImportFormatError
 from divitrack.core.inflation import parse_month
 from divitrack.core.money import to_decimal
 from divitrack.db.database import Database
 from divitrack.repositories.sqlite import (
+    AlertRepository,
     AssetRepository,
     CashFlowRepository,
     CategoryRepository,
@@ -25,6 +26,7 @@ from divitrack.repositories.sqlite import (
     CpiRepository,
     DividendRepository,
     GoalRepository,
+    PpiRepository,
     SettingsRepository,
     SnapshotRepository,
     TransactionRepository,
@@ -90,8 +92,12 @@ class DataTransferService:
         cpi: CpiRepository,
         rules: CategoryRuleRepository,
         goals: GoalRepository,
+        ppi: PpiRepository | None = None,
+        alerts: AlertRepository | None = None,
     ) -> None:
         self.db = db
+        self.ppi = ppi
+        self.alerts = alerts
         self.categories = categories
         self.flows = flows
         self.cpi = cpi
@@ -119,6 +125,7 @@ class DataTransferService:
                     "currency": a.currency.value,
                     "manual_price": _s(a.manual_price),
                     "purpose": a.purpose.value,
+                    "annual_rate": _s(a.annual_rate),
                 }
                 for a in assets
             ],
@@ -168,6 +175,17 @@ class DataTransferService:
                 for f in reversed(self.flows.list())
             ],
             "cpi": {m: _s(v) for m, v in sorted(self.cpi.all().items())},
+            "ppi": {m: _s(v) for m, v in sorted(self.ppi.all().items())} if self.ppi else {},
+            "alerts": [
+                {
+                    "kind": al.kind.value,
+                    "asset_id": al.asset_id,
+                    "threshold": _s(al.threshold),
+                    "note": al.note,
+                    "active": al.active,
+                }
+                for al in (self.alerts.list() if self.alerts else [])
+            ],
             "category_rules": [{"pattern": pattern, "category_id": cid} for _, pattern, cid in self.rules.list()],
             "goals": [
                 {
@@ -211,6 +229,7 @@ class DataTransferService:
                     currency=Currency(a["currency"]),
                     manual_price=to_decimal(a["manual_price"]) if a.get("manual_price") else None,
                     purpose=Purpose(a.get("purpose") or Purpose.UNASSIGNED),
+                    annual_rate=to_decimal(a["annual_rate"]) if a.get("annual_rate") else None,
                 ),
             )
             for a in data.get("assets", [])
@@ -267,7 +286,18 @@ class DataTransferService:
             )
             for g in data.get("goals", [])
         ]
-        return assets, txs, divs, snaps, settings, categories, flows, cpi, rules, goals
+        ppi = {parse_month(m): to_decimal(v) for m, v in (data.get("ppi") or {}).items()}
+        alerts = [
+            (
+                int(al["asset_id"]) if al.get("asset_id") is not None else None,
+                AlertKind(al["kind"]),
+                to_decimal(al["threshold"]),
+                str(al.get("note", "")),
+                bool(al.get("active", True)),
+            )
+            for al in data.get("alerts", [])
+        ]
+        return assets, txs, divs, snaps, settings, categories, flows, cpi, rules, goals, ppi, alerts
 
     def _apply(
         self,
@@ -281,7 +311,11 @@ class DataTransferService:
         cpi: dict[str, Decimal],
         rules: list[tuple[str, int]],
         goals: list[tuple[Goal, list[int]]],
+        ppi: dict[str, Decimal] | None = None,
+        alerts: list[tuple[int | None, AlertKind, Decimal, str, bool]] | None = None,
     ) -> ImportReport:
+        ppi = ppi or {}
+        alerts = alerts or []
         report = ImportReport()
         id_map: dict[int, int] = {}
         for old_id, asset in assets:
@@ -365,6 +399,17 @@ class DataTransferService:
                 continue
             goal.asset_ids = tuple(id_map[a] for a in old_assets if a in id_map)
             self.goals.add(goal)
+        if ppi and self.ppi is not None:
+            self.ppi.replace_all({**self.ppi.all(), **ppi})
+        if self.alerts is not None:
+            existing_alerts = {(a.kind, a.asset_id, a.threshold) for a in self.alerts.list()}
+            for old_asset, kind, threshold, note, active in alerts:
+                asset_id = id_map.get(old_asset) if old_asset is not None else None
+                if kind.needs_asset and asset_id is None:
+                    continue
+                if (kind, asset_id, threshold) in existing_alerts:
+                    continue
+                self.alerts.add(Alert(kind, threshold, asset_id, note, active))
         return report
 
     def _validate_ledger(self, new_txs: list[Transaction]) -> None:
@@ -384,6 +429,7 @@ class DataTransferService:
                 "price_cache",
                 "cash_flows",
                 "cpi_monthly",
+                "ppi_monthly",
                 "score_history",
                 "goals",
             ):

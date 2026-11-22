@@ -145,3 +145,20 @@ def required_change(break_even: Decimal | None, price: Decimal | None) -> Decima
     if break_even is None or price is None or price <= 0:
         return None
     return (break_even / price - ONE) * Decimal(100)
+
+
+def accrued_unit_price(lots: Sequence[OpenLot], annual_rate_pct: Decimal, as_of: date) -> Decimal | None:
+    """Mevduat gibi faiz işleyen varlıkta birim değer: her lot alış gününden bugüne günlük bileşik büyür.
+
+    Birim = Σ adet × (1 + r)^(gün/365) / Σ adet. Nakitte adet = anapara (birim fiyat 1) kabul edilir.
+    """
+    total = sum((lot.quantity for lot in lots), ZERO)
+    if total <= 0:
+        return None
+    r = 1 + float(annual_rate_pct) / 100
+    grown = ZERO
+    for lot in lots:
+        days = max(0, (as_of - lot.trade.trade_date).days)
+        unit = lot.cost / lot.quantity if lot.quantity else ONE
+        grown += lot.quantity * unit * Decimal(str(r ** (days / 365)))
+    return grown / total

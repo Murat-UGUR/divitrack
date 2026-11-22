@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from divitrack.core.calculations import compute_position
@@ -12,6 +13,7 @@ from divitrack.core.entities import Asset, PositionState, PriceQuote, Transactio
 from divitrack.core.enums import AssetClass, Currency
 from divitrack.core.exceptions import ValidationError
 from divitrack.core.money import ZERO, pct
+from divitrack.core.returns import accrued_unit_price, open_lots
 from divitrack.repositories.sqlite import AssetRepository, TransactionRepository
 from divitrack.services.market.market_data_service import MarketDataService
 from divitrack.services.market.symbols import DERIVED_GRAM_METALS, METAL_PRESETS
@@ -95,10 +97,17 @@ class PortfolioSummary:
 
 
 class PortfolioService:
-    def __init__(self, assets: AssetRepository, transactions: TransactionRepository, market: MarketDataService) -> None:
+    def __init__(
+        self,
+        assets: AssetRepository,
+        transactions: TransactionRepository,
+        market: MarketDataService,
+        today: Callable[[], date] = date.today,
+    ) -> None:
         self.assets = assets
         self.transactions = transactions
         self.market = market
+        self.today = today
 
     # ------------------------------------------------------------------ varlıklar
     def add_asset(self, asset: Asset) -> Asset:
@@ -159,10 +168,28 @@ class PortfolioService:
         grouped = self.transactions.by_asset()
         return [(a, compute_position(grouped.get(a.id or -1, []), as_of=as_of)) for a in self.assets.list()]
 
+    def interest_quotes(self, assets: list[Asset]) -> dict[int, PriceQuote]:
+        """Faiz oranı girilmiş nakit/mevduat varlıkları için günlük bileşik işlemiş birim değer."""
+        rated = [a for a in assets if a.annual_rate is not None and a.asset_class is AssetClass.CASH]
+        if not rated:
+            return {}
+        grouped = self.transactions.by_asset()
+        today = self.today()
+        out: dict[int, PriceQuote] = {}
+        for a in rated:
+            assert a.id is not None and a.annual_rate is not None
+            lots = open_lots(grouped.get(a.id, []))
+            unit = accrued_unit_price(lots, a.annual_rate, today)
+            if unit is not None:
+                prev = accrued_unit_price(lots, a.annual_rate, today - timedelta(days=1))
+                out[a.id] = PriceQuote(unit, prev, a.currency, None, "interest")
+        return out
+
     def summary(self, base: Currency, *, force_refresh: bool = False) -> PortfolioSummary:
         pairs = self.positions()
         open_assets = [a for a, s in pairs if s.is_open]
         quotes = self.market.quotes_for(open_assets, force=force_refresh)
+        quotes.update(self.interest_quotes(open_assets))
         currencies = {q.currency for q in quotes.values()} | {a.currency for a, _ in pairs}
         rates = self.market.fx_rates(currencies, base, force=force_refresh)
 

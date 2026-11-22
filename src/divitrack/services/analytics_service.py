@@ -37,6 +37,8 @@ from divitrack.services.insights_service import InsightsService, PlanRules
 from divitrack.services.market.market_data_service import MarketDataService, value_on
 from divitrack.services.portfolio_service import PortfolioService, PortfolioSummary
 
+EXPECTED_CPI_KEY = "inflation.expected_12m"  # önümüzdeki 12 ay için beklenen TÜFE (%)
+
 BENCHMARKS_KEY = "benchmarks"
 
 
@@ -311,6 +313,11 @@ class BreakEvenRow:
     nominal: Decimal  # ortalama maliyet
     real: Decimal | None  # TÜFE ile bugüne taşınmış maliyet / adet
     gold: Decimal | None  # aynı parayla alınabilecek altının bugünkü değeri / adet
+    real_12m: Decimal | None = None  # beklenen enflasyonla 12 ay sonraki enflasyona göre başa baş
+
+    @property
+    def real_12m_gap_pct(self) -> Decimal | None:
+        return required_change(self.real_12m, self.price)
 
     @property
     def nominal_gap_pct(self) -> Decimal | None:
@@ -447,6 +454,8 @@ class AnalyticsService:
     def break_even(self, report: LotReport | None = None) -> list[BreakEvenRow]:
         """Varlık başına nominal, enflasyona göre ve altına göre başa baş birim fiyatı."""
         report = report or self.lots()
+        raw = self.settings.get(EXPECTED_CPI_KEY)
+        forward = ONE + Decimal(raw) / 100 if raw else None
         groups: dict[int, list[LotRow]] = defaultdict(list)
         for lot in report.lots:
             groups[lot.asset.id or -1].append(lot)
@@ -473,6 +482,7 @@ class AnalyticsService:
                     nominal=cost / qty,
                     real=cost_real / qty if cost_real is not None else None,
                     gold=gold,
+                    real_12m=cost_real / qty * forward if cost_real is not None and forward is not None else None,
                 )
             )
         return sorted(rows, key=lambda r: -(r.price or ZERO) * r.quantity)

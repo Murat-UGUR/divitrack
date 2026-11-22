@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
+from divitrack.core.enums import AlertKind, AssetClass, Currency, DividendStatus, FlowKind, Purpose, TxType
 from divitrack.core.exceptions import ValidationError
 from divitrack.core.money import ONE, ZERO, pct
 
@@ -26,6 +26,7 @@ class Asset:
     manual_price: Decimal | None = None
     purpose: Purpose = Purpose.UNASSIGNED
     id: int | None = None
+    annual_rate: Decimal | None = None  # nakit/mevduat: yıllık net faiz (%), günlük bileşik işler
 
     def __post_init__(self) -> None:
         self.symbol = self.symbol.strip().upper()
@@ -36,6 +37,11 @@ class Asset:
         self.purpose = Purpose(self.purpose)
         if self.manual_price is not None and self.manual_price < 0:
             raise ValidationError("Manuel fiyat negatif olamaz")
+        if self.annual_rate is not None:
+            if self.asset_class is not AssetClass.CASH:
+                raise ValidationError("Faiz oranı yalnızca Nakit/BES (mevduat) varlıkları için girilebilir")
+            if not ZERO <= self.annual_rate <= Decimal(500):
+                raise ValidationError("Yıllık faiz %0 ile %500 arasında olmalı")
 
     @property
     def display_name(self) -> str:
@@ -163,6 +169,43 @@ class Snapshot:
     total_value: Decimal
     total_cost: Decimal
     currency: Currency
+
+
+@dataclass(frozen=True, slots=True)
+class AssetSnapshot:
+    """Bir günün varlık bazındaki kaydı (raporlama para biriminde): "Ne değişti?" karşılaştırması için."""
+
+    snapshot_date: date
+    asset_id: int
+    quantity: Decimal
+    price: Decimal  # birim fiyat (raporlama para birimi)
+    value: Decimal
+    cost: Decimal
+    currency: Currency
+
+
+@dataclass(slots=True)
+class Alert:
+    """Fiyat, ağırlık veya düşüş alarmı. `asset_id` portföy geneli alarmlarda boştur."""
+
+    kind: AlertKind
+    threshold: Decimal
+    asset_id: int | None = None
+    note: str = ""
+    active: bool = True
+    last_triggered: date | None = None
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        self.kind = AlertKind(self.kind)
+        if self.kind.needs_asset and self.asset_id is None:
+            raise ValidationError(f"{self.kind.label} alarmı için varlık seçilmeli")
+        if not self.kind.needs_asset:
+            self.asset_id = None
+        if self.threshold <= 0:
+            raise ValidationError("Alarm eşiği sıfırdan büyük olmalı")
+        if self.kind in (AlertKind.WEIGHT_ABOVE, AlertKind.DRAWDOWN) and self.threshold > 100:
+            raise ValidationError("Yüzde eşiği 100'den büyük olamaz")
 
 
 @dataclass(slots=True)
