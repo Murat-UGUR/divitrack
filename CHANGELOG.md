@@ -1,5 +1,27 @@
 # Değişiklik Günlüğü
 
+## [0.8.0] - 2026-11-22
+
+### Eklendi
+- **Düzenli alım planı** (Aylık Plan): aylık miktar hedefi (ör. 10 gram altın), ay ay plan / gerçekleşen, ortalama maliyetin seyri, fiyat eşiğin altına inince ek alım önerisi
+- **Alarmlar** (Ayarlar): fiyat altına/üstüne, portföydeki pay ve zirveden düşüş; Portföy Özeti'nde ve `python -m divitrack.cli check` ile denetlenir
+- **Telegram**: tetiklenen alarm için günde bir bildirim; `python -m divitrack.cli bot` ile mesajdan onaylı işlem girişi, `/durum`, `/alarmlar`, `/plan`
+- **Hızlı giriş**: "5 gr altın 5750", "sat 100 EREGL 45,5", "12 SCHD 31.5$ 18.11.2026" gibi tek satırdan önizlemeli işlem (arayüz, CLI ve bot)
+- **Döküm aktarma** (Varlıklar > Döküm aktar): aracı kurum, portföy uygulaması ve banka altın/fon dökümleri için başlıktan otomatik kolon eşleme, kayıtlı profiller, tutardan fiyat, mükerrer koruması, bilinmeyen semboller için varlık oluşturma
+- **Mevduat faizi**: Nakit varlığa yıllık net faiz girilince değer günlük bileşik işler
+- **Ne değişti?** (Analiz): varlık bazında günlük kayıt; iki gün arasında farkın fiyattan mı yeni alımdan mı geldiği
+- **Risk** (Analiz): para girişlerinden arındırılmış zirveden düşüş, yıllık oynaklık, korelasyon tablosu
+- **12 ay sonraki enflasyon eşiği**: beklenen TÜFE girilince başa baş tablosunda ileriye dönük kolon
+- **Pasif gelir hedefi** (Aylık Plan): temettüden aylık hedef, ilerleme, net verim ve gereken ek yatırım
+- **Yurt dışı satış kazancı ön izlemesi** (Analiz > Vergi): FIFO, alış/satış günü kuru, Yİ-ÜFE endekslemesi (%10 kuralı), isteğe bağlı istisna; Yİ-ÜFE tablosu (Ayarlar)
+- **Güvenlik**: uygulama parolası (PBKDF2), şifreli veritabanı yedeği (Fernet)
+- Komut satırı: `python -m divitrack.cli check | add | bot`
+
+### Değişti
+- Şema v5: `assets.annual_rate`, `asset_snapshots`, `ppi_monthly`, `alerts` (otomatik migration)
+- JSON yedeğe faiz oranı, Yİ-ÜFE ve alarmlar eklendi; Telegram anahtarı ve parola özeti yedeğe yazılmaz
+- Yeni bağımlılık: `cryptography`
+
 ## [0.7.0] - 2026-11-21
 
 ### Eklendi

@@ -13,6 +13,7 @@ from divitrack.core.enums import Currency, Purpose
 from divitrack.core.exceptions import DivitrackError
 from divitrack.core.money import HUNDRED, ZERO, to_decimal
 from divitrack.services.budget_service import add_months, month_start
+from divitrack.ui import sections
 from divitrack.ui.components.widgets import sidebar
 from divitrack.ui.formatting import fmt_money, fmt_pct, fmt_qty
 from divitrack.ui.pages.budget import month_label
@@ -101,6 +102,8 @@ def render() -> None:
 
     _purchase_check(c, base, summary, rules)
     _average_cost(c)
+    sections.buy_plan(c)
+    sections.passive_income(c)
     _goals()
 
     st.subheader("Aylık rutin")

@@ -10,6 +10,7 @@ from divitrack.core.entities import Asset, Transaction
 from divitrack.core.enums import AssetClass, Currency, Purpose, TxType
 from divitrack.core.money import to_decimal
 from divitrack.services.market.symbols import METAL_PRESETS
+from divitrack.ui import sections
 from divitrack.ui.components.widgets import sidebar
 from divitrack.ui.formatting import fmt_qty
 from divitrack.ui.state import get_container, run_action, show_flashes
@@ -80,6 +81,15 @@ def _asset_form() -> None:
             help="Fiyatı API'den gelmeyen varlıklar (BES fonu vb.) için. Nakit için boş bırakın: "
             "adet = tutar kabul edilir.",
         )
+        rate = (
+            col2.text_input(
+                "Yıllık net faiz % (mevduat, opsiyonel)",
+                help="Girilirse değer, her yatırma gününden itibaren günlük bileşik faizle büyür. Net (stopaj sonrası) "
+                "oranı gir. Para piyasası fonları için bunun yerine TEFAS fon kodunu Yatırım Fonu olarak ekle.",
+            )
+            if asset_class is AssetClass.CASH
+            else ""
+        )
         if st.form_submit_button("Varlık ekle", type="primary"):
 
             def add() -> Asset:
@@ -91,6 +101,7 @@ def _asset_form() -> None:
                         name=name,
                         manual_price=to_decimal(manual, field="Manuel fiyat") if manual.strip() else None,
                         purpose=purpose,
+                        annual_rate=to_decimal(rate, field="Faiz") if rate.strip() else None,
                     )
                 )
 
@@ -159,6 +170,13 @@ def _asset_editor(asset: Asset) -> None:
         manual = st.text_input(
             "Manuel fiyat (boş = API)", value="" if asset.manual_price is None else str(asset.manual_price)
         )
+        rate = (
+            st.text_input(
+                "Yıllık net faiz % (boş = faiz yok)", value="" if asset.annual_rate is None else str(asset.annual_rate)
+            )
+            if asset.asset_class is AssetClass.CASH
+            else ""
+        )
         col1, col2 = st.columns(2)
         update = col1.form_submit_button("Güncelle")
         confirm = col2.checkbox("Silmeyi onayla (işlemler ve temettüler de silinir)", key=f"cf_{asset.id}")
@@ -169,6 +187,7 @@ def _asset_editor(asset: Asset) -> None:
             asset.name = name
             asset.purpose = purpose
             asset.manual_price = to_decimal(manual, field="Manuel fiyat") if manual.strip() else None
+            asset.annual_rate = to_decimal(rate, field="Faiz") if rate.strip() else None
             return c.portfolio.update_asset(asset)
 
         run_action(upd, f"{asset.symbol} güncellendi")
@@ -186,9 +205,12 @@ def render() -> None:
     st.title("Varlıklar & İşlemler")
 
     assets = c.portfolio.assets.list()
-    tab_tx, tab_assets, tab_history = st.tabs(["Yeni İşlem", "Varlıklar", "İşlem Geçmişi"])
+    tab_tx, tab_assets, tab_history, tab_import = st.tabs(["Yeni İşlem", "Varlıklar", "İşlem Geçmişi", "Döküm aktar"])
     with tab_tx:
+        sections.quick_entry(c)
         _transaction_form(assets)
+    with tab_import:
+        sections.broker_import(c)
     with tab_assets:
         _asset_form()
         if assets:

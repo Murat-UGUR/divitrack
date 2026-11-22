@@ -21,10 +21,19 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Alım alım getiri** | Her alış ayrı lot (satışlar FIFO, bedelsiz orantılı); lot ve kalem bazında **nominal, reel, dolar ve altın bazında** getiri — kur yükselişinin TL getiriyi ne kadar şişirdiğini ve "aynı parayla altın alsaydım" kıyasını gösterir |
 | **Başa baş fiyatları** | Her varlık için zararı kapatacak fiyat: nominal (ortalama maliyet), enflasyona göre (TÜFE ile taşınmış maliyet) ve altına göre; bugünkü fiyattan gereken değişim |
 | **Para akışı** | Hangi ay ne kadar yatırdın / çektin, birikimli net tutar ve bunun TÜFE ile bugünkü karşılığı |
+| **Mevduat faizi** | Nakit varlığa yıllık net faiz girilince değer günlük bileşik işler |
 | **Kıyas** | Bugüne kadar gerçekleşen toplam getiri (nominal, reel, dolar ve altın bazında) ile para ağırlıklı yıllık getiri (XIRR) ayrı ayrı; kendi girdiğin mevduat, BIST, altın, dolar gibi araçlarla yan yana |
 | **Senaryolar** | Hazır şablonlar (devalüasyon, altında düzeltme, BIST/ABD düşüşü, kötü gün) veya kendi kur/fiyat şokların; toplam ve amaç bazında etki |
 | **Alım öncesi kontrol** | Bir varlığa para eklemeden önce tek kalem sınırı, amaç hedefi ve deneme bütçesine ne olacağını gösterir |
 | **Ortalama maliyet hesaplayıcı** | Ek alımın yeni ortalamaya, nominal ve enflasyona göre başa baş noktasına etkisi; hedef ortalamaya inmek için gereken adet ve tutar |
+| **Düzenli alım planı** | Aylık miktar hedefi (ör. 10 gram altın), plan / gerçekleşen, ortalamanın ay ay seyri, fiyat eşiğin altındaysa ek alım önerisi |
+| **Pasif gelir hedefi** | Temettüden aylık hedef; ilerleme, net verim ve hedef için gereken ek yatırım |
+| **Alarmlar ve Telegram** | Fiyat eşiği, portföydeki pay, zirveden düşüş; tetiklenince Telegram mesajı. Bot ile mesajdan onaylı işlem girişi ve `/durum` |
+| **Hızlı giriş** | `5 gr altın 5750`, `sat 100 EREGL 45,5`, `12 SCHD 31.5$ 18.11.2026` — önizleyip tek tıkla kaydet |
+| **Döküm aktarma** | Aracı kurum, portföy uygulaması ve banka altın/fon dökümleri: otomatik kolon eşleme, kayıtlı profiller, mükerrer koruması |
+| **Ne değişti? / Risk** | İki gün arasında farkın fiyattan mı yeni alımdan mı geldiği; para girişinden arındırılmış zirveden düşüş, oynaklık, korelasyon |
+| **Satış kazancı ön izlemesi** | ABD hisse/ETF satışlarında TL kazanç: alış/satış günü kuru, Yİ-ÜFE endekslemesi, isteğe bağlı istisna |
+| **Güvenlik** | Uygulama parolası (PBKDF2) ve şifreli veritabanı yedeği |
 | **Dikkat Edilecekler** | Hedef sapması, yoğunlaşma, fiyatsız varlık, eski TÜFE, aşılan bütçe, yaklaşan temettü ve beyan sınırı uyarıları |
 | **Bütçe** | Gelir/gider kategorileri, aylık kategori bütçeleri, tasarruf oranı, 12 aylık seyir |
 | **Banka Dökümü** | Herhangi bir bankanın CSV dökümünü kolon eşleyerek içe aktarma (tek tutar veya Borç/Alacak), açıklamaya göre otomatik kategori kuralları, önizlemede elle düzeltme, mükerrer kayıt koruması |
@@ -36,6 +45,18 @@ BIST hisseleri, ABD hisse/ETF'leri, fonlar, kıymetli madenler ve nakit/BES varl
 | **Gizlilik modu** | Kenar çubuğundaki *Tutarları gizle* ile ekran paylaşırken tutarlar maskelenir, tablo ve grafikler bulanıklaşır |
 | **Vergi Ön İzleme** | Yurt dışı temettülerin yıllık brüt TL toplamı ve kendi girdiğiniz beyan sınırına göre doluluk |
 | **Veri Taşınabilirliği** | JSON tam yedek (birleştir/geri yükle), işlem, temettü ve gelir/gider CSV'leri (Excel'in `;` ayracı desteklenir), tek tıkla `.db` yedeği |
+
+## ⌨️ Komut satırı ve Telegram
+
+```bash
+python -m divitrack.cli check                  # fiyatları yenile, günlük kaydı al, alarmları denetle
+python -m divitrack.cli add "5 gr altın 5750"  # metinle işlem ekle (onay sorar)
+python -m divitrack.cli bot                    # Telegram botu: mesajla işlem, /durum, /alarmlar, /plan
+```
+
+`check` komutunu Windows Görev Zamanlayıcı veya cron ile her akşam çalıştırırsan alarmlar uygulama kapalıyken de
+denetlenir. Telegram için **Ayarlar & Veri > Bildirimler** bölümüne bot anahtarını ve sohbet kimliğini gir
+(ya da `.env` içinde `DIVITRACK_TELEGRAM_TOKEN`). Bot yalnızca kayıtlı sohbet kimliğinden gelen mesajları işler.
 
 ## 🚀 Hızlı Başlangıç
 

@@ -35,6 +35,8 @@ def render() -> None:
         )
         return
     c.snapshots.record(summary)
+    for fired in c.alerts.check(summary):
+        st.warning(fired.message)
 
     # --- 12 aylık temettü beklentisi (raporlama para biriminde, net) ---------
     today = date.today()

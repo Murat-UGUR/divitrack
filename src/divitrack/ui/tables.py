@@ -407,6 +407,8 @@ def break_even_frame(rows: Sequence[BreakEvenRow]) -> pd.DataFrame:
                 "Nominal fark %": _f(r.nominal_gap_pct),
                 "Enflasyona göre": _f(r.real),
                 "Enflasyon fark %": _f(r.real_gap_pct),
+                "12 ay sonra": _f(r.real_12m),
+                "12 ay sonra fark %": _f(r.real_12m_gap_pct),
                 "Altına göre": _f(r.gold),
                 "Altın fark %": _f(r.gold_gap_pct),
             }
@@ -419,6 +421,8 @@ def break_even_frame(rows: Sequence[BreakEvenRow]) -> pd.DataFrame:
             "Nominal fark %",
             "Enflasyona göre",
             "Enflasyon fark %",
+            "12 ay sonra",
+            "12 ay sonra fark %",
             "Altına göre",
             "Altın fark %",
         ],

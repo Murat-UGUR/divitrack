@@ -16,6 +16,7 @@ from divitrack.services.analytics_service import Benchmark
 from divitrack.services.budget_service import add_months
 from divitrack.services.insights_service import PlanRules
 from divitrack.services.io.transfer import TX_COLUMNS
+from divitrack.ui import sections
 from divitrack.ui.components.widgets import sidebar
 from divitrack.ui.state import flash, get_container, run_action, show_flashes
 from divitrack.ui.tables import cpi_frame
@@ -37,8 +38,13 @@ def render() -> None:
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
 
     _rules()
+    sections.expectations(c)
     _cpi()
+    sections.ppi(c)
     _benchmarks()
+    sections.alerts(c)
+    sections.notifications(c)
+    sections.security(c)
 
     # --- Stopaj ------------------------------------------------------------------
     st.subheader("Temettü stopaj oranları")

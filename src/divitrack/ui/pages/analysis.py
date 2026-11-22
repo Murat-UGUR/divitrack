@@ -11,6 +11,7 @@ from divitrack.core.enums import AssetClass, Currency
 from divitrack.core.money import HUNDRED
 from divitrack.core.planning import score_grade
 from divitrack.services.analytics_service import PRESETS
+from divitrack.ui import sections
 from divitrack.ui.components import charts
 from divitrack.ui.components.widgets import consume_force_refresh, sidebar
 from divitrack.ui.formatting import fmt_money, fmt_pct, fmt_signed_money
@@ -46,17 +47,33 @@ def render() -> None:
         real = c.insights.real_returns()
         health = c.insights.health(summary, real, rules)
 
-    tab_alloc, tab_cards, tab_real, tab_lots, tab_be, tab_flow, tab_bench, tab_score, tab_whatif = st.tabs(
+    (
+        tab_alloc,
+        tab_cards,
+        tab_real,
+        tab_lots,
+        tab_be,
+        tab_chg,
+        tab_flow,
+        tab_bench,
+        tab_risk,
+        tab_score,
+        tab_whatif,
+        tab_tax,
+    ) = st.tabs(
         [
             "Amaçlara göre dağılım",
             "Varlık karnesi",
             "Enflasyona göre",
             "Alım alım getiri",
             "Başa baş",
+            "Ne değişti?",
             "Para akışı",
             "Kıyas",
+            "Risk",
             "Sağlık puanı",
             "Ya şöyle olursa?",
+            "Vergi (satış)",
         ]
     )
     with tab_alloc:
@@ -69,6 +86,12 @@ def render() -> None:
         _lots(c)
     with tab_be:
         _break_even(c)
+    with tab_chg:
+        sections.changes(c, base)
+    with tab_risk:
+        sections.risk(c, base)
+    with tab_tax:
+        sections.tax(c)
     with tab_flow:
         _contributions(c)
     with tab_bench:
@@ -337,7 +360,8 @@ def _break_even(c) -> None:  # type: ignore[no-untyped-def]
         "Zararı kapatmak için fiyatın nereye gelmesi gerekiyor? **Nominal**: ortalama maliyet. "
         "**Enflasyona göre**: alımların TÜFE ile bugüne taşınmış maliyeti ÷ adet; bu nokta her ay enflasyon "
         "kadar yükselir. **Altına göre**: aynı paralarla alış günlerinde gram altın alınsaydı bugünkü değeri "
-        "÷ adet. Fark %: bugünkü fiyattan gereken değişim; eksi ise o eşik zaten geçilmiş."
+        "÷ adet. **12 ay sonra**: Ayarlar'da girdiğin enflasyon beklentisiyle bir yıl sonraki enflasyon eşiği. "
+        "Fark %: bugünkü fiyattan gereken değişim; eksi ise o eşik zaten geçilmiş."
     )
     behind = [r.asset.symbol for r in rows if r.real_gap_pct is not None and r.real_gap_pct > 0]
     k1, k2 = st.columns(2)
@@ -346,13 +370,16 @@ def _break_even(c) -> None:  # type: ignore[no-untyped-def]
         "Nominal zararda",
         f"{sum(1 for r in rows if r.nominal_gap_pct is not None and r.nominal_gap_pct > 0)} / {len(rows)} kalem",
     )
-    gap = {k: NUM(format="%+.1f") for k in ("Nominal fark %", "Enflasyon fark %", "Altın fark %")}
+    gap = {k: NUM(format="%+.1f") for k in ("Nominal fark %", "Enflasyon fark %", "12 ay sonra fark %", "Altın fark %")}
     st.dataframe(
         break_even_frame(rows),
         hide_index=True,
         width="stretch",
         column_config={
-            **{k: NUM(format="%.4f") for k in ("Fiyat", "Nominal başa baş", "Enflasyona göre", "Altına göre")},
+            **{
+                k: NUM(format="%.4f")
+                for k in ("Fiyat", "Nominal başa baş", "Enflasyona göre", "12 ay sonra", "Altına göre")
+            },
             **gap,
         },
     )

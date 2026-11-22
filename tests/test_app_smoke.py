@@ -18,8 +18,9 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from divitrack.bootstrap import build_container  # noqa: E402
 from divitrack.config import Settings  # noqa: E402
-from divitrack.core.entities import Asset, CashFlow, Dividend, Goal, Transaction  # noqa: E402
-from divitrack.core.enums import AssetClass, Currency, DividendStatus, Purpose, TxType  # noqa: E402
+from divitrack.core.entities import Alert, Asset, CashFlow, Dividend, Goal, Transaction  # noqa: E402
+from divitrack.core.enums import AlertKind, AssetClass, Currency, DividendStatus, Purpose, TxType  # noqa: E402
+from divitrack.core.gold_plan import BuyPlan  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "app.py")
@@ -75,6 +76,29 @@ def _seed(db: Path) -> None:
             status=DividendStatus.PAID,
         )
     )
+    # 0.8: mevduat faizi, alım planı, alarmlar, varlık kayıtları, beklentiler, yurt dışı satış
+    deposit = c.portfolio.add_asset(Asset("MEVDUAT", AssetClass.CASH, Currency.TRY, annual_rate=D("40")))
+    c.portfolio.add_transaction(
+        Transaction(
+            asset_id=deposit.id, tx_type=TxType.BUY, quantity=D("5000"), price=D("1"), trade_date=date(2026, 1, 2)
+        )
+    )
+    us = c.portfolio.add_asset(Asset("AAPL", AssetClass.US_STOCK, Currency.USD, manual_price=D("200")))
+    c.portfolio.add_transaction(
+        Transaction(asset_id=us.id, tx_type=TxType.BUY, quantity=D("5"), price=D("150"), trade_date=date(2025, 1, 2))
+    )
+    c.portfolio.add_transaction(
+        Transaction(asset_id=us.id, tx_type=TxType.SELL, quantity=D("2"), price=D("190"), trade_date=date(2026, 3, 2))
+    )
+    c.plans.save_buy_plan(BuyPlan("BES-FON", D("10"), "2026-01", dip_price=D("2"), dip_extra=D("5")))
+    c.plans.set_passive_target(D("500"))
+    c.plans.set_expected_cpi(D("25"))
+    c.ppi.replace_all({"2024-12": D("100"), "2026-02": D("125")})
+    c.alerts.add(Alert(AlertKind.PRICE_BELOW, D("2"), fund.id, "ucuz"))
+    c.alerts.add(Alert(AlertKind.DRAWDOWN, D("10")))
+    for day in (date(2026, 10, 1), date(2026, 11, 1)):
+        c.snapshots.today = lambda day=day: day
+        c.snapshots.record(c.portfolio.summary(Currency.TRY))
 
 
 def _page_script(page: str) -> str:
@@ -114,3 +138,30 @@ def test_budget_form_adds_flow(_isolated_db: Path) -> None:
     assert not at.exception, at.exception
     c = build_container(Settings(db_path=_isolated_db, offline=True), use_default_provider=False)
     assert any(f.amount == D("1250.50") for f in c.budget.flows.list())
+
+
+def test_quick_entry_saves_transaction(_isolated_db: Path) -> None:
+    _seed(_isolated_db)
+    at = AppTest.from_string(_page_script("holdings"), default_timeout=60).run()
+    next(t for t in at.text_input if t.label == "İşlem").set_value("3 THYAO 260")
+    next(b for b in at.button if b.label == "Önizle").click().run()
+    assert not at.exception, at.exception
+    next(b for b in at.button if b.label == "Kaydet" and b.key == "quick_save").click().run()
+    assert not at.exception, at.exception
+    c = build_container(Settings(db_path=_isolated_db, offline=True), use_default_provider=False)
+    assert any(t.note == "hızlı giriş" and t.quantity == D("3") for t in c.portfolio.transactions.list())
+
+
+def test_password_locks_app(_isolated_db: Path) -> None:
+    c = build_container(Settings(db_path=_isolated_db, offline=True), use_default_provider=False)
+    c.security.set_password("cok-gizli-parola")
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert at.title[0].value == "🔒 DiviTrack"
+    at.text_input[0].set_value("yanlis-parola")
+    at.button[0].click().run()
+    assert at.error and at.title[0].value == "🔒 DiviTrack"
+    at.text_input[0].set_value("cok-gizli-parola")
+    at.button[0].click().run()
+    assert not at.exception, at.exception
+    assert at.title[0].value == "Portföy Özeti"
