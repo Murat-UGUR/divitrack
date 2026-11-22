@@ -26,17 +26,22 @@ from divitrack.repositories.sqlite import (
     SnapshotRepository,
     TransactionRepository,
 )
+from divitrack.services.alert_service import AlertService
 from divitrack.services.analytics_service import AnalyticsService
 from divitrack.services.budget_service import BudgetService
 from divitrack.services.cpi_service import CpiService
 from divitrack.services.dividend_engine import DividendEngine
 from divitrack.services.goal_service import GoalService
 from divitrack.services.insights_service import InsightsService
+from divitrack.services.io.broker_import import BrokerImportService
 from divitrack.services.io.transfer import DataTransferService
 from divitrack.services.market.market_data_service import MarketDataService
+from divitrack.services.notify import TelegramNotifier
 from divitrack.services.plan_service import PlanService
 from divitrack.services.portfolio_service import PortfolioService
+from divitrack.services.quick_entry_service import QuickEntryService
 from divitrack.services.risk_service import RiskService
+from divitrack.services.security_service import SecurityService
 from divitrack.services.snapshot_service import SnapshotService
 from divitrack.services.tax_service import TaxService
 
@@ -65,6 +70,11 @@ class Container:
     tax: TaxService
     plans: PlanService
     ppi: PpiRepository
+    notifier: TelegramNotifier
+    alerts: AlertService
+    quick: QuickEntryService
+    broker_import: BrokerImportService
+    security: SecurityService
 
     @property
     def base_currency(self) -> Currency:
@@ -118,6 +128,7 @@ def build_container(
     budget = BudgetService(categories, flows, settings_repo, CategoryRuleRepository(db))
     insights = InsightsService(portfolio, txs, divs, budget, cpi, market, settings_repo, ScoreHistoryRepository(db))
     dividends = DividendEngine(divs, settings_repo, provider)
+    notifier = TelegramNotifier(settings_repo, env_token=settings.telegram_token)
     container = Container(
         settings=settings,
         db=db,
@@ -151,6 +162,11 @@ def build_container(
         tax=TaxService(portfolio, PpiRepository(db), settings_repo),
         plans=PlanService(portfolio, dividends, settings_repo),
         ppi=PpiRepository(db),
+        notifier=notifier,
+        alerts=AlertService(AlertRepository(db), portfolio, snaps, notifier),
+        quick=QuickEntryService(portfolio),
+        broker_import=BrokerImportService(portfolio, settings_repo),
+        security=SecurityService(settings_repo),
     )
     container.insights.goals = container.goals
     return container

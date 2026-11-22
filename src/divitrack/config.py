@@ -37,6 +37,7 @@ class Settings:
     price_cache_ttl_min: int = 15
     offline: bool = False
     log_level: str = "INFO"
+    telegram_token: str = ""
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> Settings:
@@ -55,4 +56,5 @@ class Settings:
             price_cache_ttl_min=int(get("PRICE_CACHE_TTL_MIN", "15")),
             offline=_truthy(get("OFFLINE", "0")),
             log_level=get("LOG_LEVEL", "INFO").upper(),
+            telegram_token=get("TELEGRAM_TOKEN", ""),
         )
