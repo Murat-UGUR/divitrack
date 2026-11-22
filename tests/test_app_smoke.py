@@ -127,7 +127,7 @@ def test_plan_page_suggests_split(_isolated_db: Path) -> None:
     _seed(_isolated_db)
     at = AppTest.from_string(_page_script("plan"), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert len(at.dataframe) == 1  # bütçeden gelen tutarla plan tablosu
+    assert len(at.dataframe) == 2  # bütçeden gelen tutarla plan tablosu + düzenli alım planı tablosu
 
 
 def test_budget_form_adds_flow(_isolated_db: Path) -> None:

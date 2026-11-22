@@ -305,21 +305,21 @@ def quick_entry(c) -> None:  # type: ignore[no-untyped-def]
         preview = st.form_submit_button("Önizle")
     if preview and text.strip():
         try:
-            st.session_state["quick_entry"] = c.quick.prepare(text)
+            st.session_state["_quick_pending"] = c.quick.prepare(text)
         except DivitrackError as exc:
-            st.session_state.pop("quick_entry", None)
+            st.session_state.pop("_quick_pending", None)
             st.error(str(exc))
-    entry = st.session_state.get("quick_entry")
+    entry = st.session_state.get("_quick_pending")
     if entry is not None:
         st.info(entry.describe())
         for w in entry.warnings:
             st.warning(w)
         col1, col2 = st.columns(2)
         if col1.button("Kaydet", type="primary", key="quick_save"):
-            st.session_state.pop("quick_entry", None)
+            st.session_state.pop("_quick_pending", None)
             run_action(lambda: c.quick.save(entry), "İşlem kaydedildi")
         if col2.button("Vazgeç", key="quick_cancel"):
-            st.session_state.pop("quick_entry", None)
+            st.session_state.pop("_quick_pending", None)
             st.rerun()
 
 
